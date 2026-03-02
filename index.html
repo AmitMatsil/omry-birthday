@@ -40,6 +40,7 @@ body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
 </head>
 <body>
 <canvas id="c"></canvas>
+<audio id="bgm" src="OmriBirthdayGame/theme.mp3" loop preload="auto"></audio>
 
 <!-- Start Screen -->
 <div class="ovr" id="sc0">
@@ -202,7 +203,7 @@ function updatePlayer() {
   P.vx = Math.max(-SPEED, Math.min(SPEED, P.vx));
 
   if (jump && !P._pj && P.jumps < P.maxJumps) {
-    P.vy = JUMP_F; P.jumps++; P.onGround = false;
+    P.vy = JUMP_F; P.jumps++; P.onGround = false; sfxJump();
   }
   P._pj = jump;
 
@@ -219,7 +220,8 @@ function updatePlayer() {
 
   if (P.y > STAGE.worldH + 80) {
     P.lives--;
-    if (P.lives <= 0) { GS = 'dead'; deadTimer = 90; return; }
+    if (P.lives <= 0) { sfxGameOver(); GS = 'dead'; deadTimer = 90; return; }
+    sfxFall();
     P.x = STAGE.spawnX; P.y = STAGE.spawnY;
     P.vx = 0; P.vy = 0; P.invincible = 120;
   }
@@ -243,6 +245,13 @@ function platCollide(p, pl) {
 
 function overlap(a, b) {
   return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+// Shared damage helper — plays sfx and applies knockback
+function dmgP(p, ex, vy) {
+  p.lives--; p.invincible=90; p.vy=vy||(-9); p.vx=(p.x<ex)?-5:5;
+  sfxHit();
+  if(p.lives<=0){sfxGameOver();GS='dead';deadTimer=90;}
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -300,6 +309,34 @@ function txt(s, x, y, sz, col, align) {
 }
 
 function flash(t, a, b, rate) { return Math.floor(t * rate) % 2 === 0 ? a : b; }
+
+// ═══════════════════════════════════════════════════════════
+//  AUDIO / SFX
+// ═══════════════════════════════════════════════════════════
+let audioCtx = null;
+function getAC() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function tone(freq, type, dur, vol, delay) {
+  try {
+    const ac = getAC();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    o.type = type || 'sine';
+    const t0 = ac.currentTime + (delay || 0);
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(vol || 0.25, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.start(t0); o.stop(t0 + dur);
+  } catch(e) {}
+}
+function sfxJump()     { tone(330,'sine',0.09,0.22); tone(520,'sine',0.08,0.18,0.07); }
+function sfxCollect()  { tone(880,'sine',0.07,0.28); tone(1100,'sine',0.09,0.22,0.05); tone(1320,'sine',0.07,0.18,0.10); }
+function sfxHit()      { tone(200,'sawtooth',0.15,0.35); tone(130,'sawtooth',0.12,0.3,0.1); }
+function sfxFall()     { tone(220,'sawtooth',0.08,0.3); tone(180,'sawtooth',0.1,0.25,0.08); }
+function sfxStageWin() { [523,659,784,1047].forEach((f,i)=>tone(f,'sine',0.22,0.28,i*0.11)); }
+function sfxGameOver() { [440,349,277,220].forEach((f,i)=>tone(f,'sawtooth',0.22,0.32,i*0.14)); }
 
 // ═══════════════════════════════════════════════════════════
 //  PALETTES
@@ -674,10 +711,10 @@ function mkS0() {
       for (const e of enemies) {
         e.x += e.vx;
         if (e.x<30||e.x>WW-80) e.vx*=-1;
-        if (p.invincible===0 && overlap(p,e)) { p.lives--; p.invincible=90; p.vy=-9; p.vx=(p.x<e.x)?-5:5; if(p.lives<=0){GS='dead';deadTimer=90;} }
+        if (p.invincible===0 && overlap(p,e)) dmgP(p, e.x+e.w/2);
       }
       for (const it of items) {
-        if (!it.collected && overlap(p,it)) { it.collected=true; this.itemsCollected++; score+=100; showMsg(`🍼 Bottle! ${this.itemsCollected}/${NEED}`); }
+        if (!it.collected && overlap(p,it)) { it.collected=true; this.itemsCollected++; score+=100; sfxCollect(); showMsg(`🍼 Bottle! ${this.itemsCollected}/${NEED}`); }
       }
     },
 
@@ -749,10 +786,10 @@ function mkS1() {
         s.x+=s.vx; s.y+=s.vy;
         if(s.x<20||s.x>WW-70) s.vx*=-1;
         if(s.y<20||s.y>260) s.vy*=-1;
-        if(p.invincible===0&&overlap(p,s)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<s.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,s)) dmgP(p, s.x+s.w/2);
       }
       for (const it of items) {
-        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(`🎸 Pick! ${this.itemsCollected}/${NEED}`);}
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;sfxCollect();showMsg(`🎸 Pick! ${this.itemsCollected}/${NEED}`);}
       }
     },
 
@@ -832,10 +869,10 @@ function mkS2() {
       for(const v of viruses){
         v.x+=v.vx;
         if(v.x<30||v.x>WW-80)v.vx*=-1;
-        if(p.invincible===0&&overlap(p,v)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<v.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,v)) dmgP(p, v.x+v.w/2);
       }
       for(const it of items){
-        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(`💾 USB! ${this.itemsCollected}/${NEED}`);}
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;sfxCollect();showMsg(`💾 USB! ${this.itemsCollected}/${NEED}`);}
       }
     },
 
@@ -916,10 +953,10 @@ function mkS3() {
       for(const b of bugs){
         b.x+=b.vx;
         if(b.x<30||b.x>WW-80)b.vx*=-1;
-        if(p.invincible===0&&overlap(p,b)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<b.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,b)) dmgP(p, b.x+b.w/2);
       }
       for(const it of items){
-        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(it.type==='laptop'?`💻 Laptop! ${this.itemsCollected}/${NEED}`:`🍺 Beer! ${this.itemsCollected}/${NEED}`);}
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;sfxCollect();showMsg(it.type==='laptop'?`💻 Laptop! ${this.itemsCollected}/${NEED}`:`🍺 Beer! ${this.itemsCollected}/${NEED}`);}
       }
     },
 
@@ -1009,10 +1046,10 @@ function mkS4() {
       for(const g of guests){
         g.x+=g.vx;
         if(g.x<30||g.x>WW-80)g.vx*=-1;
-        if(p.invincible===0&&overlap(p,g)){p.lives--;p.invincible=90;p.vy=-8;p.vx=(p.x<g.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,g)) dmgP(p, g.x+g.w/2, -8);
       }
       for(const it of items){
-        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(`💕 ${this.itemsCollected}/${NEED}`);}
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;sfxCollect();showMsg(`💕 ${this.itemsCollected}/${NEED}`);}
       }
     },
 
@@ -1114,10 +1151,10 @@ function mkS5() {
       for(const e of exes){
         e.x+=e.vx;
         if(e.x<30||e.x>WW-80)e.vx*=-1;
-        if(p.invincible===0&&overlap(p,e)){p.lives--;p.invincible=90;p.vy=-8;p.vx=(p.x<e.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,e)) dmgP(p, e.x+e.w/2, -8);
       }
       for(const r of rings){
-        if(!r.collected&&overlap(p,r)){r.collected=true;this.itemsCollected++;score+=100;showMsg(`💍 Ring! ${this.itemsCollected}/${NEED}`);}
+        if(!r.collected&&overlap(p,r)){r.collected=true;this.itemsCollected++;score+=100;sfxCollect();showMsg(`💍 Ring! ${this.itemsCollected}/${NEED}`);}
       }
     },
 
@@ -1197,10 +1234,10 @@ function mkS6() {
         z.x+=z.vx; z.y+=z.vy;
         if(z.x<20||z.x>WW-70)z.vx*=-1;
         if(z.y<50||z.y>300)z.vy*=-1;
-        if(p.invincible===0&&overlap(p,z)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<z.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,z)) dmgP(p, z.x+z.w/2);
       }
       for(const it of items){
-        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(it.type==='diaper'?`🚼 Diaper! ${this.itemsCollected}/${NEED}`:`🍼 Milk! ${this.itemsCollected}/${NEED}`);}
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;sfxCollect();showMsg(it.type==='diaper'?`🚼 Diaper! ${this.itemsCollected}/${NEED}`:`🍼 Milk! ${this.itemsCollected}/${NEED}`);}
       }
     },
 
@@ -1292,14 +1329,14 @@ function mkS7() {
         // Only explode on the ground (y>=390), never on platforms
         if(m.y+m.h>=390){m.explode=1;continue;}
         // Hit player
-        if(p.invincible===0&&overlap(p,m)){m.explode=1;p.lives--;p.invincible=90;p.vy=-10;p.vx=(p.x<m.x)?-7:7;if(p.lives<=0){GS='dead';deadTimer=90;}}
+        if(p.invincible===0&&overlap(p,m)){m.explode=1;p.lives--;p.invincible=90;p.vy=-10;p.vx=(p.x<m.x)?-7:7;sfxHit();if(p.lives<=0){sfxGameOver();GS='dead';deadTimer=90;}}
       }
       missiles=missiles.filter(m=>m.explode<30);
 
       // Update cakes
       for(const c of cakes){
         c.y+=c.vy;
-        if(!c.collected&&overlap(p,c)){c.collected=true;this.itemsCollected++;score+=200;showMsg(`🎂 Cake! +200pts x${this.itemsCollected}`);}
+        if(!c.collected&&overlap(p,c)){c.collected=true;this.itemsCollected++;score+=200;sfxCollect();showMsg(`🎂 Cake! +200pts x${this.itemsCollected}`);}
       }
       cakes=cakes.filter(c=>!c.collected&&c.y<GH+30);
     },
@@ -1418,24 +1455,37 @@ function drawTouchCtrl() {
 // ═══════════════════════════════════════════════════════════
 function drawStory() {
   if(!STAGE) return;
-  const cl=pal(), t=Date.now()*0.001;
+  const cl=pal();
   const bg=ctx.createLinearGradient(0,0,0,GH);
   bg.addColorStop(0,cl.sky); bg.addColorStop(1,cl.sky2);
   ctx.fillStyle=bg; ctx.fillRect(0,0,GW,GH);
 
-  // Title box
-  ctx.fillStyle='rgba(0,0,0,0.55)';
-  ctx.beginPath(); ctx.roundRect(GW/2-280,50,560,GH-100,18); ctx.fill();
+  // Box (leave room for button below)
+  const BX=GW/2-275, BY=42, BW=550, BH=GH-112;
+  ctx.fillStyle='rgba(0,0,0,0.62)';
+  ctx.beginPath(); ctx.roundRect(BX,BY,BW,BH,18); ctx.fill();
 
-  ctx.fillStyle=cl.txt;
-  ctx.font=`bold ${clamp(26,5,38)}px Courier New`;
+  const maxTw = BW - 44; // text max-width inside box (22px padding each side)
   ctx.textAlign='center';
-  ctx.fillText(STAGE.storyTitle, GW/2, 115);
 
-  STAGE.storyLines.forEach((line,i)=>{
+  // Title (wrapped)
+  const titleSz = clamp(20,3.5,30);
+  ctx.font = `bold ${titleSz}px Courier New`;
+  ctx.fillStyle = cl.txt;
+  const titleLines = wrapTextMeasure(STAGE.storyTitle, maxTw);
+  let y = BY + 46;
+  titleLines.forEach(ln => { ctx.fillText(ln, GW/2, y); y += titleSz + 5; });
+  y += 8;
+
+  // Story lines (wrapped, smaller font)
+  const lsz = clamp(14, 2.5, 17);
+  const lh  = lsz + 8;
+  STAGE.storyLines.forEach(line => {
     ctx.fillStyle='rgba(255,255,255,0.88)';
-    ctx.font=`${clamp(17,3.5,21)}px Courier New`;
-    ctx.fillText(line, GW/2, 165+i*44);
+    ctx.font = `${lsz}px Courier New`;
+    const wrapped = wrapTextMeasure(line, maxTw);
+    wrapped.forEach(wl => { ctx.fillText(wl, GW/2, y); y += lh; });
+    y += 5; // gap between entries
   });
 
   // PLAY button
@@ -1447,6 +1497,20 @@ function drawStory() {
 
 function clamp(base,vwFactor,max) {
   return Math.min(max, Math.max(base, Math.floor(window.innerWidth*vwFactor/100)));
+}
+
+// Wrap text to fit within maxWidth pixels (ctx.font must be set before calling)
+function wrapTextMeasure(text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > maxWidth && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [text];
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1620,6 +1684,7 @@ function gameLoop() {
         // Stage complete bonus: 500 base + 150 per life remaining
         stageBonus = 500 + (P.lives * 150);
         score += stageBonus;
+        sfxStageWin();
         GS='stage_win'; winTimer=0;
       }
 
@@ -1661,6 +1726,12 @@ function gameLoop() {
 //  EVENT HANDLERS
 // ═══════════════════════════════════════════════════════════
 document.getElementById('b0').addEventListener('click', () => {
+  // Start theme music (requires user gesture for autoplay policy)
+  const bgm = document.getElementById('bgm');
+  bgm.volume = 0.55;
+  bgm.play().catch(() => {});
+  // Unlock Web Audio context
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   hideOverlays();
   startStage(0);
 });
