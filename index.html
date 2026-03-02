@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>🎂 Happy Birthday Omry!</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; touch-action:none; -webkit-tap-highlight-color:transparent; }
+body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
+#c { position:fixed; top:0; left:0; }
+.ovr {
+  position:fixed; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  background:rgba(0,0,0,0.93); color:#fff; z-index:20;
+  padding:24px; text-align:center; gap:14px;
+}
+.ovr h1 { font-size:clamp(20px,5vw,38px); }
+.ovr h2 { font-size:clamp(17px,4vw,28px); }
+.ovr p  { font-size:clamp(13px,3vw,18px); opacity:.85; max-width:480px; line-height:1.5; }
+.btn {
+  background:#e74c3c; color:#fff; border:none;
+  padding:14px 36px; font-size:clamp(14px,3.5vw,21px);
+  cursor:pointer; border-radius:10px; font-family:'Courier New',monospace;
+  transition:transform .1s,filter .1s;
+}
+.btn:hover,.btn:active { filter:brightness(1.2); transform:scale(1.05); }
+.btn.green { background:#27ae60; }
+.btn.pink  { background:#e91e63; }
+.lbl {
+  display:inline-flex; align-items:center; gap:8px;
+  background:#1a1a2e; border:2px dashed #555; color:#fff;
+  padding:12px 24px; font-size:clamp(12px,3vw,17px);
+  cursor:pointer; border-radius:8px; font-family:'Courier New',monospace;
+}
+.lbl:hover { border-color:#aaa; }
+.face { width:70px; height:70px; border-radius:50%; border:3px solid #fff; object-fit:cover; display:none; }
+.hint { font-size:clamp(10px,2vw,13px); opacity:.5; }
+.off { display:none !important; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- Start Screen -->
+<div class="ovr" id="sc0">
+  <h1>🎂 Happy Birthday Omry! 🎂</h1>
+  <p>Your entire life story — as a <b>platformer game</b>.<br>8 stages. Pure chaos. 100% love.</p>
+  <p id="spriteStatus" style="font-size:13px;opacity:0.6;">Loading sprites...</p>
+  <button class="btn" id="b0">🎮 BEGIN THE ADVENTURE!</button>
+</div>
+
+<script>
+'use strict';
+// roundRect polyfill for older browsers
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    r = Math.min(r, w/2, h/2);
+    this.beginPath();
+    this.moveTo(x+r, y);
+    this.lineTo(x+w-r, y); this.quadraticCurveTo(x+w, y, x+w, y+r);
+    this.lineTo(x+w, y+h-r); this.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    this.lineTo(x+r, y+h); this.quadraticCurveTo(x, y+h, x, y+h-r);
+    this.lineTo(x, y+r); this.quadraticCurveTo(x, y, x+r, y);
+    this.closePath();
+    return this;
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CANVAS SETUP
+// ═══════════════════════════════════════════════════════════
+const GW = 800, GH = 450;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let scale = 1, ox = 0, oy = 0;
+
+function resize() {
+  const sw = window.innerWidth / GW, sh = window.innerHeight / GH;
+  scale = Math.min(sw, sh);
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  ox = (window.innerWidth  - GW * scale) / 2;
+  oy = (window.innerHeight - GH * scale) / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ═══════════════════════════════════════════════════════════
+//  SPRITES — loaded from OmriBirthdayGame/ folder
+// ═══════════════════════════════════════════════════════════
+const SPR = { omry: null, amit: null, hadas: null, rinat: null };
+let spritesLoaded = 0;
+
+function loadStaticSprites() {
+  const names = ['omry', 'amit', 'hadas', 'rinat'];
+  names.forEach(name => {
+    const img = new Image();
+    img.onload = () => {
+      SPR[name] = img;
+      spritesLoaded++;
+      const el = document.getElementById('spriteStatus');
+      if (el) el.textContent = `Sprites loaded: ${spritesLoaded}/${names.length} ✓`;
+    };
+    img.onerror = () => {
+      spritesLoaded++;
+      const el = document.getElementById('spriteStatus');
+      if (el) el.textContent = `Sprites: ${spritesLoaded}/${names.length} (some missing, using defaults)`;
+    };
+    img.src = `OmriBirthdayGame/${name}.png`;
+  });
+}
+loadStaticSprites();
+
+// ═══════════════════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════════════════
+const K = {};
+window.addEventListener('keydown', e => {
+  K[e.code] = true;
+  if ([32,37,38,39,40].includes(e.keyCode)) e.preventDefault();
+  if ((e.code === 'Space' || e.code === 'Enter') && (GS === 'story' || GS === 'stage_win')) nextState();
+});
+window.addEventListener('keyup', e => { K[e.code] = false; });
+
+const TC = { left:false, right:false, jump:false };
+
+function toGC(cx, cy) { return { x:(cx-ox)/scale, y:(cy-oy)/scale }; }
+
+function getBtns() {
+  return [
+    { id:'left',  x:15,    y:GH-90, w:75, h:75 },
+    { id:'right', x:100,   y:GH-90, w:75, h:75 },
+    { id:'jump',  x:GW-95, y:GH-90, w:75, h:75 },
+  ];
+}
+
+function applyTouch(touches) {
+  TC.left = TC.right = TC.jump = false;
+  for (const t of touches) {
+    const p = toGC(t.clientX, t.clientY);
+    for (const b of getBtns())
+      if (p.x>b.x && p.x<b.x+b.w && p.y>b.y && p.y<b.y+b.h)
+        TC[b.id] = true;
+    // Also allow tap anywhere (for story/win screens)
+    if (GS === 'story' || GS === 'stage_win') nextState();
+  }
+}
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
+canvas.addEventListener('touchmove',  e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
+canvas.addEventListener('touchend',   e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
+canvas.addEventListener('touchcancel',e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
+canvas.addEventListener('click', () => { if (GS === 'story' || GS === 'stage_win') nextState(); });
+
+// ═══════════════════════════════════════════════════════════
+//  PLAYER
+// ═══════════════════════════════════════════════════════════
+const GRAVITY = 0.48, JUMP_F = -12, SPEED = 4.6, FRIC = 0.78;
+
+let P = null;
+function mkPlayer(x, y) {
+  return { x, y, vx:0, vy:0, w:36, h:50, onGround:false, facingRight:true, jumps:0, maxJumps:2, invincible:0, lives:3, _pj:false };
+}
+
+function updatePlayer() {
+  if (!P || GS !== 'playing') return;
+  const left  = K.ArrowLeft  || K.KeyA || TC.left;
+  const right = K.ArrowRight || K.KeyD || TC.right;
+  const jump  = K.ArrowUp || K.KeyW || K.Space || TC.jump;
+
+  if (left)  { P.vx -= 1.8; P.facingRight = false; }
+  if (right) { P.vx += 1.8; P.facingRight = true;  }
+  if (!left && !right) P.vx *= FRIC;
+  P.vx = Math.max(-SPEED, Math.min(SPEED, P.vx));
+
+  if (jump && !P._pj && P.jumps < P.maxJumps) {
+    P.vy = JUMP_F; P.jumps++; P.onGround = false;
+  }
+  P._pj = jump;
+
+  P.vy += GRAVITY;
+  if (P.vy > 16) P.vy = 16;
+
+  P.x += P.vx;
+  P.x = Math.max(0, Math.min(P.x, STAGE.worldW - P.w));
+
+  P.y += P.vy;
+  P.onGround = false;
+
+  for (const pl of STAGE.platforms) platCollide(P, pl);
+
+  if (P.y > STAGE.worldH + 80) {
+    P.lives--;
+    if (P.lives <= 0) { GS = 'dead'; deadTimer = 90; return; }
+    P.x = STAGE.spawnX; P.y = STAGE.spawnY;
+    P.vx = 0; P.vy = 0; P.invincible = 120;
+  }
+  if (P.invincible > 0) P.invincible--;
+}
+
+function platCollide(p, pl) {
+  if (p.x+p.w <= pl.x || p.x >= pl.x+pl.w || p.y+p.h <= pl.y || p.y >= pl.y+pl.h) return;
+  const oy_ = Math.min(p.y+p.h - pl.y, pl.y+pl.h - p.y);
+  const ox_ = Math.min(p.x+p.w - pl.x, pl.x+pl.w - p.x);
+  if (oy_ <= ox_) {
+    if (p.vy >= 0 && p.y+p.h/2 < pl.y+pl.h/2) {
+      p.y = pl.y - p.h; p.vy = 0; p.onGround = true; p.jumps = 0;
+    } else if (p.vy < 0) { p.y = pl.y + pl.h; p.vy = 0; }
+  } else {
+    if (p.x+p.w/2 < pl.x+pl.w/2) p.x = pl.x - p.w;
+    else p.x = pl.x + pl.w;
+    p.vx = 0;
+  }
+}
+
+function overlap(a, b) {
+  return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CAMERA
+// ═══════════════════════════════════════════════════════════
+let CAM = { x:0, y:0 };
+function updateCam() {
+  if (!P || !STAGE) return;
+  const tx = P.x + P.w/2 - GW/2;
+  const ty = P.y + P.h/2 - GH*0.45;
+  CAM.x += (tx - CAM.x) * 0.13;
+  CAM.y += (ty - CAM.y) * 0.13;
+  CAM.x = Math.max(0, Math.min(CAM.x, STAGE.worldW - GW));
+  CAM.y = Math.max(0, Math.min(CAM.y, STAGE.worldH - GH));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DRAWING UTILS
+// ═══════════════════════════════════════════════════════════
+function faceCircle(spr, cx, cy, r, fallback) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.clip();
+  if (spr) { ctx.drawImage(spr, cx-r, cy-r, r*2, r*2); }
+  else {
+    ctx.fillStyle = fallback || '#95a5a6'; ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${r*0.9}px Arial`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('?', cx, cy);
+  }
+  ctx.restore();
+}
+
+function heart(x, y, s) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + s*0.35);
+  ctx.bezierCurveTo(x - s*1.5, y - s*0.2, x - s*1.5, y + s*0.8, x, y + s*1.3);
+  ctx.bezierCurveTo(x + s*1.5, y + s*0.8, x + s*1.5, y - s*0.2, x, y + s*0.35);
+  ctx.fill();
+}
+
+function cloud(x, y) {
+  ctx.beginPath();
+  ctx.arc(x,    y,    28, 0, Math.PI*2);
+  ctx.arc(x+28, y-10, 20, 0, Math.PI*2);
+  ctx.arc(x+52, y,    25, 0, Math.PI*2);
+  ctx.arc(x+26, y+12, 18, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function txt(s, x, y, sz, col, align) {
+  ctx.fillStyle = col; ctx.font = `bold ${sz}px Courier New`;
+  ctx.textAlign = align || 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(s, x, y);
+}
+
+function flash(t, a, b, rate) { return Math.floor(t * rate) % 2 === 0 ? a : b; }
+
+// ═══════════════════════════════════════════════════════════
+//  PALETTES
+// ═══════════════════════════════════════════════════════════
+const PAL = [
+  { sky:'#ffe5ec', sky2:'#ffc2d1', g:'#ff758f', p:'#ffb3c6', body:'#ff4d6d', leg:'#c9184a', txt:'#800016' },  // 0 baby
+  { sky:'#0d0221', sky2:'#1a0535', g:'#2d0149', p:'#3d0066', body:'#9b59b6', leg:'#6c3483', txt:'#d8b4fe' },  // 1 emo
+  { sky:'#0a1628', sky2:'#0d2137', g:'#0d3320', p:'#1a4a2e', body:'#2ecc71', leg:'#1e8449', txt:'#00ff88' },  // 2 army
+  { sky:'#16213e', sky2:'#0f3460', g:'#0f3460', p:'#533483', body:'#e94560', leg:'#1a1a2e', txt:'#e94560' },  // 3 IT
+  { sky:'#ff6b9d', sky2:'#ff9eb5', g:'#f8bbd0', p:'#ff85a1', body:'#c2185b', leg:'#880e4f', txt:'#fff0f5' },  // 4 love
+  { sky:'#fafafa', sky2:'#fff8e1', g:'#dc143c', p:'#ffd700', body:'#111',    leg:'#333',    txt:'#b8860b' },  // 5 wedding
+  { sky:'#e3f2fd', sky2:'#bbdefb', g:'#90caf9', p:'#42a5f5', body:'#0277bd', leg:'#01579b', txt:'#0d47a1' },  // 6 daniel
+  { sky:'#1a1a1a', sky2:'#2d2d2d', g:'#333',    p:'#404040', body:'#e74c3c', leg:'#c0392b', txt:'#f39c12' },  // 7 missiles
+];
+function pal() { return PAL[stageIdx] || PAL[0]; }
+
+// ═══════════════════════════════════════════════════════════
+//  PLAYER DRAWING
+// ═══════════════════════════════════════════════════════════
+function drawPlayer() {
+  if (!P) return;
+  if (P.invincible > 0 && Math.floor(P.invincible/5)%2 === 1) return;
+  const cl = pal();
+  const sx = Math.round(P.x - CAM.x), sy = Math.round(P.y - CAM.y);
+  const cx = sx + P.w/2, cy = sy + P.h;
+  const headR = P.w/2 + 1;
+  const headY = sy + headR - 4;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (!P.facingRight) ctx.scale(-1, 1);
+
+  // Body
+  ctx.fillStyle = cl.body;
+  ctx.fillRect(-P.w/2, -P.h*0.55, P.w, P.h*0.55);
+
+  // Legs
+  const legSwing = P.onGround ? Math.sin(Date.now()*0.012) * 6 : 0;
+  ctx.fillStyle = cl.leg;
+  ctx.fillRect(-P.w/2, -P.h*0.17 + legSwing,  P.w/2-2, P.h*0.18);
+  ctx.fillRect(2,      -P.h*0.17 - legSwing,  P.w/2-2, P.h*0.18);
+
+  ctx.restore();
+
+  // Head (face sprite)
+  faceCircle(SPR.omry, cx, headY, headR, '#f5cba7');
+
+  // Stage accessories
+  drawAccessory(cx, headY, headR, P);
+}
+
+function drawAccessory(cx, hy, hr, p) {
+  const cl = pal();
+  ctx.save();
+  ctx.translate(cx, hy);
+  switch (stageIdx) {
+    case 0: // Diaper
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-P.w/2-2, P.h*0.33, P.w+4, 12);
+      break;
+    case 1: // Emo side-swept hair
+      ctx.fillStyle = '#111';
+      ctx.beginPath(); ctx.ellipse(-hr*0.2, -hr*0.7, hr*1.1, hr*0.55, -0.35, 0, Math.PI*2); ctx.fill();
+      break;
+    case 2: // Military beret
+      ctx.fillStyle = '#2d5a27';
+      ctx.beginPath(); ctx.ellipse(hr*0.25, -hr*0.65, hr*1.05, hr*0.5, -0.3, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#FFD700'; ctx.beginPath(); ctx.arc(0, -hr*0.7, 5, 0, Math.PI*2); ctx.fill();
+      break;
+    case 3: // Party hat
+      ctx.fillStyle = '#e74c3c';
+      ctx.beginPath(); ctx.moveTo(-hr*0.3, -hr*0.9); ctx.lineTo(hr*0.3, -hr*0.9); ctx.lineTo(0, -hr*2); ctx.fill();
+      ctx.fillStyle = '#FFD700'; ctx.beginPath(); ctx.arc(0, -hr*2, 5, 0, Math.PI*2); ctx.fill();
+      break;
+    case 5: case 6: // Wedding tux / Baby Daniel
+      if (stageIdx === 5) {
+        ctx.fillStyle = '#111';
+        ctx.fillRect(-P.w/2, -P.h*0.5, P.w, P.h*0.45);
+        ctx.fillStyle = '#fff'; ctx.fillRect(-4, -P.h*0.45, 8, P.h*0.35);
+      }
+      break;
+    case 7: // Birthday hat
+      ctx.fillStyle = '#f39c12';
+      ctx.beginPath(); ctx.moveTo(-hr*0.35, -hr*0.85); ctx.lineTo(hr*0.35, -hr*0.85); ctx.lineTo(0, -hr*2); ctx.fill();
+      ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(0, -hr*2, 5, 0, Math.PI*2); ctx.fill();
+      break;
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BACKGROUND DRAWING
+// ═══════════════════════════════════════════════════════════
+function drawBG() {
+  const cl = pal(), t = Date.now()*0.001;
+  const g = ctx.createLinearGradient(0,0,0,GH);
+  g.addColorStop(0, cl.sky); g.addColorStop(1, cl.sky2);
+  ctx.fillStyle = g; ctx.fillRect(0,0,GW,GH);
+
+  switch (stageIdx) {
+    case 0: { // Baby - clouds
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      for (let i=0; i<6; i++) cloud(((i*290 + t*25)%(GW+160))-80, 50+Math.sin(i*1.5)*25);
+      // Stars/bubbles
+      for (let i=0; i<10; i++) {
+        ctx.fillStyle = 'rgba(255,182,193,0.55)';
+        ctx.beginPath(); ctx.arc((i*113)%GW, (i*79+20)%(GH*0.5), 4, 0, Math.PI*2); ctx.fill();
+      }
+      break;
+    }
+    case 1: { // Emo - rain + moon
+      ctx.strokeStyle = 'rgba(100,100,200,0.28)'; ctx.lineWidth = 1;
+      for (let i=0; i<35; i++) {
+        const rx = (i*67 + t*80)%GW, ry = (i*53 + t*180)%GH;
+        ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx-3,ry+14); ctx.stroke();
+      }
+      // Moon
+      ctx.fillStyle = '#d4d4ff'; ctx.beginPath(); ctx.arc(GW-65,52,32,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = PAL[1].sky; ctx.beginPath(); ctx.arc(GW-50,45,26,0,Math.PI*2); ctx.fill();
+      break;
+    }
+    case 2: { // Army - matrix
+      ctx.fillStyle = 'rgba(0,255,70,0.08)';
+      ctx.font = '13px Courier New'; ctx.textAlign = 'left';
+      for (let i=0; i<14; i++) {
+        const x = i*57+8, y = (i*43 + Math.floor(t*6)*11)%GH;
+        ctx.fillText(Math.random()>0.5?'1':'0', x, y);
+        ctx.fillText(Math.random()>0.5?'0':'1', x, (y+22)%GH);
+      }
+      ctx.strokeStyle = 'rgba(0,255,70,0.05)'; ctx.lineWidth = 1;
+      for (let x=0; x<GW; x+=45) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,GH); ctx.stroke(); }
+      break;
+    }
+    case 3: { // IT/Party - confetti
+      const cols = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c'];
+      for (let i=0; i<22; i++) {
+        const x = (i*131 + Math.sin(t*0.8+i*0.9)*28)%GW;
+        const y = (i*97  + Math.cos(t*1.1+i*0.7)*20)%GH;
+        ctx.fillStyle = cols[i%6];
+        ctx.save(); ctx.translate(x,y); ctx.rotate(t*1.5+i);
+        ctx.fillRect(-4,-4,8,8); ctx.restore();
+      }
+      break;
+    }
+    case 4: { // Love - floating hearts
+      ctx.fillStyle = 'rgba(255,105,180,0.28)';
+      for (let i=0; i<10; i++) {
+        const x = (i*90 + Math.sin(t*0.7+i)*22)%GW;
+        const y = GH - ((i*70 + t*28)%(GH+30));
+        heart(x, y, 12);
+      }
+      break;
+    }
+    case 5: { // Wedding - petals falling
+      for (let i=0; i<18; i++) {
+        const x = (i*70 + Math.sin(t*0.4+i)*18)%GW;
+        const y = (t*22*(1+i%3*0.5) + i*45)%(GH+60) - 30;
+        ctx.fillStyle = `rgba(255,${180+i*3},${180+i*4},0.55)`;
+        ctx.beginPath(); ctx.ellipse(x,y,5,8,t+i,0,Math.PI*2); ctx.fill();
+      }
+      // Cross at back
+      ctx.fillStyle = 'rgba(218,165,32,0.18)';
+      ctx.fillRect(GW*0.5-6, 20, 12, 80);
+      ctx.fillRect(GW*0.5-28, 42, 56, 12);
+      break;
+    }
+    case 6: { // Baby - ZZZ
+      ctx.fillStyle = 'rgba(100,150,255,0.18)';
+      ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center';
+      for (let i=0; i<5; i++) {
+        const x = 100+i*150+Math.sin(t+i)*18;
+        const y = 50+(i*45+t*18)%(GH*0.6);
+        ctx.fillText('z', x, y);
+      }
+      break;
+    }
+    case 7: { // Missiles - city silhouette + stars
+      ctx.fillStyle = 'rgba(255,220,80,0.7)';
+      for (let i=0; i<28; i++) {
+        const x=(i*137)%GW, y=(i*97)%(GH*0.45);
+        const r = Math.abs(Math.sin(t*2.5+i))*1.2+0.5;
+        ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(40,40,40,0.6)';
+      const bhs = [70,100,55,85,110,65,90,80,120,75,95,60,100,88];
+      bhs.forEach((bh,i) => ctx.fillRect(i*58, GH-bh, 52, bh));
+      break;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PLATFORM DRAWING
+// ═══════════════════════════════════════════════════════════
+function drawPlatforms() {
+  const cl = pal(), t = Date.now()*0.001;
+  for (const pl of STAGE.platforms) {
+    const sx = pl.x-CAM.x, sy = pl.y-CAM.y;
+    if (sx>GW+30||sx+pl.w<-30||sy>GH+30||sy+pl.h<-30) continue;
+    drawPlatform(pl, sx, sy, cl, t);
+  }
+}
+
+function drawPlatform(pl, sx, sy, cl, t) {
+  const isGround = pl.h > 30;
+  switch (stageIdx) {
+    case 0:
+      if (isGround) { ctx.fillStyle='#ffb3c6'; ctx.fillRect(sx,sy,pl.w,pl.h); }
+      else {
+        ctx.fillStyle='#fff'; ctx.fillRect(sx,sy+6,pl.w,pl.h-6);
+        ctx.fillStyle='rgba(255,255,255,0.9)';
+        for (let i=0;i<Math.ceil(pl.w/28);i++) { ctx.beginPath(); ctx.arc(sx+i*28+14,sy,12,0,Math.PI*2); ctx.fill(); }
+      }
+      break;
+    case 1:
+      ctx.fillStyle = isGround ? '#1a0535' : '#4a235a';
+      ctx.fillRect(sx,sy,pl.w,pl.h);
+      if (!isGround) {
+        ctx.fillStyle='#7b00cc'; ctx.fillRect(sx,sy,pl.w,3);
+        if (pl.w>55) { ctx.font='15px Arial'; ctx.textAlign='center'; ctx.fillText('💀',sx+pl.w/2,sy+pl.h+2); }
+      }
+      break;
+    case 2:
+      ctx.fillStyle='#1a4a2e'; ctx.fillRect(sx,sy,pl.w,pl.h);
+      ctx.strokeStyle='#27ae60'; ctx.lineWidth=1; ctx.strokeRect(sx,sy,pl.w,pl.h);
+      if (!isGround) {
+        for (let i=0;i<Math.floor(pl.w/22);i++) {
+          ctx.fillStyle=Math.floor(t*3+i)%2?'#00ff00':'#003300';
+          ctx.fillRect(sx+i*22+5,sy+4,6,5);
+        }
+      }
+      break;
+    case 3:
+      if (isGround) { ctx.fillStyle='#0f3460'; ctx.fillRect(sx,sy,pl.w,pl.h); }
+      else {
+        ctx.fillStyle='#8B4513'; ctx.fillRect(sx,sy,pl.w,pl.h);
+        ctx.fillStyle='#A0522D'; ctx.fillRect(sx,sy,pl.w,4);
+        // Laptop on desk
+        if (pl.w>80) {
+          ctx.fillStyle='#222'; ctx.fillRect(sx+pl.w/2-18,sy-18,36,20);
+          ctx.fillStyle='#3498db'; ctx.fillRect(sx+pl.w/2-15,sy-16,30,16);
+        }
+      }
+      break;
+    case 4:
+      if (isGround) { ctx.fillStyle='#f8bbd0'; ctx.fillRect(sx,sy,pl.w,pl.h); }
+      else {
+        ctx.fillStyle='#ff69b4'; ctx.fillRect(sx,sy+5,pl.w,pl.h-5);
+        ctx.fillStyle='#ff1493';
+        for (let i=0;i<Math.ceil(pl.w/28);i++) { ctx.save(); ctx.translate(sx+i*28+14,sy-4); heart(0,0,9); ctx.restore(); }
+      }
+      break;
+    case 5:
+      if (isGround) {
+        ctx.fillStyle='#dc143c'; ctx.fillRect(sx,sy,pl.w,pl.h);
+        ctx.fillStyle='rgba(0,0,0,0.1)';
+        for (let i=0;i<Math.ceil(pl.w/28);i++) ctx.fillRect(sx+i*28,sy,14,pl.h);
+      } else {
+        ctx.fillStyle='#fff'; ctx.fillRect(sx,sy,pl.w,pl.h);
+        ctx.fillStyle='#ffd700'; ctx.fillRect(sx,sy,pl.w,3);
+        ctx.fillStyle='rgba(255,192,203,0.5)'; ctx.fillRect(sx,sy+3,pl.w,pl.h-3);
+      }
+      break;
+    case 6:
+      ctx.fillStyle = isGround?'#bbdefb':'#42a5f5'; ctx.fillRect(sx,sy,pl.w,pl.h);
+      ctx.fillStyle='#90caf9'; ctx.fillRect(sx,sy,pl.w,3);
+      break;
+    case 7:
+      ctx.fillStyle='#404040'; ctx.fillRect(sx,sy,pl.w,pl.h);
+      ctx.fillStyle='#606060'; ctx.fillRect(sx,sy,pl.w,3);
+      break;
+    default:
+      ctx.fillStyle=cl.p; ctx.fillRect(sx,sy,pl.w,pl.h);
+      ctx.fillStyle=cl.g; ctx.fillRect(sx,sy,pl.w,3);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  GAME STATE MACHINE
+// ═══════════════════════════════════════════════════════════
+let GS = 'upload'; // upload | story | playing | dead | stage_win | game_win
+let stageIdx = 0;
+let STAGE = null;
+let storyTimer = 0;
+let winTimer = 0;
+let deadTimer = 0;
+let msgText = ''; let msgTimer = 0;
+let score = 0;
+let stageBonus = 0; // shown briefly on stage win screen
+
+function showMsg(m) { msgText = m; msgTimer = 90; }
+
+function addScore(pts) {
+  score += pts;
+  showMsg(`+${pts} pts!`);
+}
+
+function hideOverlays() {
+  document.getElementById('sc0').classList.add('off');
+}
+
+function startStage(idx) {
+  stageIdx = idx;
+  STAGE = makeStage(idx);
+  STAGE.init();
+  CAM.x = 0; CAM.y = 0;
+  P = mkPlayer(STAGE.spawnX, STAGE.spawnY);
+  GS = 'story';
+  storyTimer = 0;
+}
+
+function nextState() {
+  if (GS === 'story') { GS = 'playing'; storyTimer = 0; }
+  else if (GS === 'stage_win') {
+    const next = stageIdx + 1;
+    if (next >= 8) { GS = 'game_win'; winTimer = 0; return; }
+    startStage(next);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  STAGE FACTORY
+// ═══════════════════════════════════════════════════════════
+function makeStage(idx) {
+  switch(idx) {
+    case 0: return mkS0();
+    case 1: return mkS1();
+    case 2: return mkS2();
+    case 3: return mkS3();
+    case 4: return mkS4();
+    case 5: return mkS5();
+    case 6: return mkS6();
+    case 7: return mkS7();
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 0: BABY OMRY
+// ─────────────────────────────────────────────────────────
+function mkS0() {
+  const WW = 2000, WH = 450;
+  const plats = [
+    {x:0,y:395,w:WW,h:55},
+    {x:180,y:320,w:120,h:15},{x:360,y:265,w:110,h:15},{x:530,y:305,w:130,h:15},
+    {x:720,y:250,w:110,h:15},{x:880,y:305,w:100,h:15},{x:1060,y:245,w:130,h:15},
+    {x:1220,y:290,w:110,h:15},{x:1390,y:240,w:120,h:15},{x:1560,y:300,w:140,h:15},
+    {x:1730,y:345,w:230,h:15},
+  ];
+  const itemXY = [[210,295],[395,240],[575,280],[755,225],[915,280],[1095,220],[1255,265],[1420,215],[1595,275]];
+  const items = itemXY.map(([x,y]) => ({x,y,w:20,h:26,type:'bottle',collected:false,phase:Math.random()*Math.PI*2}));
+  let collected = 0;
+  const NEED = 7;
+  const enemies = [
+    {x:350,y:372,vx:-2,w:36,h:35,type:'rattle'},
+    {x:700,y:372,vx:2,w:36,h:35,type:'rattle'},
+    {x:1100,y:372,vx:-2.5,w:36,h:35,type:'rattle'},
+    {x:1500,y:372,vx:2,w:36,h:35,type:'rattle'},
+  ];
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:'👶 Stage 1: Baby Omry!',
+    storyLines:['The year is 1994. Baby Omry just learned to walk...','...and immediately started platforming, because of course.','Collect 7 baby bottles to grow up!','Watch out for the evil rattles! 🍼'],
+    winTitle:'🍼 Baby Mode: COMPLETE!', winLines:['Omry has learned to walk, talk, and avoid evil toys.','Next stop: teenage angst...'],
+    goal:{x:1840,y:318,w:90,h:78},
+
+    init() { collected = 0; this.itemsCollected = 0; items.forEach(i=>i.collected=false); enemies.forEach(e=>{e.x=e.x<400?350:e.x<800?700:e.x<1200?1100:1500;}); },
+
+    update(p) {
+      const t = Date.now()*0.001;
+      for (const e of enemies) {
+        e.x += e.vx;
+        if (e.x<30||e.x>WW-80) e.vx*=-1;
+        if (p.invincible===0 && overlap(p,e)) { p.lives--; p.invincible=90; p.vy=-9; p.vx=(p.x<e.x)?-5:5; if(p.lives<=0){GS='dead';deadTimer=90;} }
+      }
+      for (const it of items) {
+        if (!it.collected && overlap(p,it)) { it.collected=true; this.itemsCollected++; score+=100; showMsg(`🍼 Bottle! ${this.itemsCollected}/${NEED}`); }
+      }
+    },
+
+    draw(cam) {
+      const t = Date.now()*0.001;
+      // Items
+      for (const it of items) {
+        if (it.collected) continue;
+        const sx=it.x-cam.x, sy=it.y-cam.y+Math.sin(t*2.5+it.phase)*3;
+        ctx.fillStyle='#fff'; ctx.beginPath(); ctx.roundRect(sx+5,sy+6,10,17,3); ctx.fill();
+        ctx.fillStyle='#ffc8dd'; ctx.beginPath(); ctx.arc(sx+10,sy+6,8,Math.PI,0); ctx.fill();
+        ctx.fillStyle='#ff85a1'; ctx.fillRect(sx+7,sy,6,7);
+      }
+      // Rattles
+      for (const e of enemies) {
+        const sx=e.x-cam.x, sy=e.y-cam.y;
+        const bob = Math.sin(Date.now()*0.007)*0.25;
+        ctx.save(); ctx.translate(sx+18,sy+18); ctx.rotate(bob);
+        ctx.fillStyle='#ff4757'; ctx.beginPath(); ctx.arc(0,-6,14,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#ff6b81'; ctx.beginPath(); ctx.arc(-4,-9,8,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#cc2d3f'; ctx.fillRect(-3,8,6,18);
+        ctx.restore();
+      }
+      // Goal
+      const g=this.goal, gs=g.x-cam.x, gy2=g.y-cam.y;
+      const rdy = this.itemsCollected>=NEED;
+      ctx.fillStyle = rdy ? flash(t,'#FFD700','#FF8C00',3) : '#888';
+      ctx.fillRect(gs,gy2,g.w,g.h);
+      ctx.fillStyle = rdy?'#000':'#555';
+      txt(rdy?'GROW UP!':'🍼 x'+NEED, gs+g.w/2, gy2+g.h/2+6, 12, rdy?'#000':'#666');
+    },
+
+    winCondition(p) { return this.itemsCollected>=NEED && overlap(p,this.goal); }
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 1: EMO OMRY
+// ─────────────────────────────────────────────────────────
+function mkS1() {
+  const WW=1900, WH=450;
+  const plats = [
+    {x:0,y:395,w:WW,h:55},
+    {x:200,y:320,w:110,h:15},{x:380,y:265,w:100,h:15},{x:550,y:300,w:120,h:15},
+    {x:730,y:245,w:110,h:15},{x:900,y:295,w:100,h:15},{x:1070,y:240,w:120,h:15},
+    {x:1240,y:285,w:110,h:15},{x:1400,y:235,w:120,h:15},{x:1570,y:295,w:150,h:15},
+    {x:1720,y:348,w:180,h:15},
+  ];
+  const itemXY = [[230,295],[415,240],[590,275],[765,220],[935,270],[1105,215],[1275,260],[1435,210],[1605,270]];
+  const items = itemXY.map(([x,y]) => ({x,y,w:18,h:18,type:'pick',collected:false,phase:Math.random()*Math.PI*2}));
+  const NEED=6;
+  const suns = [
+    {x:300,y:100,vx:2,vy:1.5,w:44,h:44},{x:650,y:150,vx:-2,vy:2,w:44,h:44},
+    {x:1000,y:120,vx:2.5,vy:-1.5,w:44,h:44},{x:1400,y:100,vx:-2,vy:2,w:44,h:44},
+  ];
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:'🖤 Stage 2: EMO OMRY',
+    storyLines:['~*~ 2009 ~*~','Omry discovers metal music and black eyeliner.','He has FEELINGS and they are COMPLICATED.','Collect 6 guitar picks. Avoid the HAPPY suns. 🌞 (happiness is the enemy)'],
+    winTitle:'🤘 Emo Phase: SURVIVED!', winLines:['Omry screamed into the void. The void screamed back.','P.S. He still listens to metal. No regrets.'],
+    goal:{x:1810,y:318,w:90,h:78},
+
+    init() { this.itemsCollected=0; items.forEach(i=>i.collected=false); },
+
+    update(p) {
+      for (const s of suns) {
+        s.x+=s.vx; s.y+=s.vy;
+        if(s.x<20||s.x>WW-70) s.vx*=-1;
+        if(s.y<20||s.y>260) s.vy*=-1;
+        if(p.invincible===0&&overlap(p,s)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<s.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      for (const it of items) {
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(`🎸 Pick! ${this.itemsCollected}/${NEED}`);}
+      }
+    },
+
+    draw(cam) {
+      const t=Date.now()*0.001;
+      // Guitar picks
+      for (const it of items) {
+        if(it.collected) continue;
+        const sx=it.x-cam.x, sy=it.y-cam.y+Math.sin(t*3+it.phase)*4;
+        ctx.fillStyle='#9b59b6';
+        ctx.save(); ctx.translate(sx+9,sy+9); ctx.rotate(Math.sin(t+it.phase)*0.3);
+        ctx.beginPath(); ctx.moveTo(0,-9); ctx.lineTo(7,6); ctx.lineTo(-7,6); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+      // Happy suns (the enemies of emo-kind)
+      for (const s of suns) {
+        const sx=s.x-cam.x, sy=s.y-cam.y, t2=Date.now()*0.003;
+        ctx.fillStyle='#FFD700';
+        ctx.save(); ctx.translate(sx+22,sy+22); ctx.rotate(t2);
+        for(let i=0;i<8;i++){ctx.save();ctx.rotate(i*Math.PI/4);ctx.fillRect(-3,14,6,10);ctx.restore();}
+        ctx.fillStyle='#FFD700'; ctx.beginPath(); ctx.arc(0,0,14,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#333';
+        ctx.beginPath(); ctx.arc(-5,-3,3,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(5,-3,3,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle='#333'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.arc(0,3,5,0,Math.PI); ctx.stroke();
+        ctx.font='10px Arial'; ctx.textAlign='center'; ctx.fillStyle='#333'; ctx.fillText(':)',0,22);
+        ctx.restore();
+      }
+      // Goal: concert poster
+      const g=this.goal, gs=g.x-cam.x, gy2=g.y-cam.y;
+      const rdy=this.itemsCollected>=NEED;
+      ctx.fillStyle=rdy?flash(Date.now()*0.001,'#9b59b6','#6c3483',3):'#333';
+      ctx.fillRect(gs,gy2,g.w,g.h);
+      ctx.fillStyle=rdy?'#fff':'#666';
+      txt(rdy?'🎸 CONCERT':'🎸 x'+NEED,gs+g.w/2,gy2+g.h/2+6,11,rdy?'#fff':'#666');
+    },
+
+    winCondition(p){return this.itemsCollected>=NEED&&overlap(p,this.goal);}
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 2: CYBER ARMY — MEETS AMIT
+// ─────────────────────────────────────────────────────────
+function mkS2() {
+  const WW=2100, WH=450;
+  const plats=[
+    {x:0,y:395,w:WW,h:55},
+    {x:180,y:320,w:130,h:15},{x:370,y:260,w:120,h:15},{x:560,y:305,w:110,h:15},
+    {x:740,y:250,w:120,h:15},{x:920,y:295,w:110,h:15},{x:1100,y:240,w:130,h:15},
+    {x:1280,y:285,w:120,h:15},{x:1460,y:230,w:120,h:15},{x:1640,y:285,w:140,h:15},
+    {x:1820,y:340,w:200,h:15},
+  ];
+  const itemXY=[[210,295],[405,235],[595,280],[775,225],[955,270],[1135,215],[1315,260],[1495,205],[1675,260]];
+  const items=itemXY.map(([x,y])=>({x,y,w:18,h:22,type:'usb',collected:false,phase:Math.random()*Math.PI*2}));
+  const NEED=6;
+  const viruses=[
+    {x:300,y:372,vx:-2.5,w:30,h:30,type:'virus'},
+    {x:750,y:372,vx:3,w:30,h:30,type:'virus'},
+    {x:1200,y:372,vx:-2.5,w:30,h:30,type:'virus'},
+    {x:1700,y:372,vx:3,w:30,h:30,type:'virus'},
+  ];
+  const AMIT={x:1950,y:268,w:64,h:64};
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:'🖥️ Stage 3: CYBER ARMY',
+    storyLines:['Omry joins the elite cyber defense unit!','In the server room, amid the humming of a thousand machines...','...he meets his best friend for life: AMIT! 💻❤️','Collect 6 USB drives. Defeat the viruses. Find Amit!'],
+    winTitle:'💻 BROMANCE ACHIEVED!', winLines:['Omry and Amit: unstoppable cyber duo.','They will argue about code forever. It is beautiful.'],
+    goal:AMIT,
+
+    init(){this.itemsCollected=0;items.forEach(i=>i.collected=false);},
+
+    update(p){
+      for(const v of viruses){
+        v.x+=v.vx;
+        if(v.x<30||v.x>WW-80)v.vx*=-1;
+        if(p.invincible===0&&overlap(p,v)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<v.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      for(const it of items){
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(`💾 USB! ${this.itemsCollected}/${NEED}`);}
+      }
+    },
+
+    draw(cam){
+      const t=Date.now()*0.001;
+      // USB drives
+      for(const it of items){
+        if(it.collected)continue;
+        const sx=it.x-cam.x, sy=it.y-cam.y+Math.sin(t*2+it.phase)*3;
+        ctx.fillStyle='#27ae60'; ctx.fillRect(sx+3,sy,12,14);
+        ctx.fillStyle='#1a8a4a'; ctx.fillRect(sx+5,sy+2,8,8);
+        ctx.fillStyle='#95a5a6'; ctx.fillRect(sx,sy+14,18,8);
+        ctx.fillStyle='#bdc3c7'; ctx.fillRect(sx+2,sy+16,14,4);
+      }
+      // Viruses
+      for(const v of viruses){
+        const sx=v.x-cam.x, sy=v.y-cam.y, t2=Date.now()*0.004;
+        ctx.save(); ctx.translate(sx+15,sy+15); ctx.rotate(t2);
+        ctx.fillStyle='#e74c3c';
+        for(let i=0;i<6;i++){ctx.save();ctx.rotate(i*Math.PI/3);ctx.fillRect(-2,8,4,8);ctx.restore();}
+        ctx.fillStyle='#c0392b'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#fff'; ctx.font='bold 10px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('!',0,0);
+        ctx.restore();
+      }
+      // Amit goal
+      const g=AMIT, gs=g.x-cam.x, gy2=g.y-cam.y;
+      const rdy=this.itemsCollected>=NEED;
+      if(rdy){
+        // Glow
+        ctx.shadowColor='#00ff88'; ctx.shadowBlur=18;
+        faceCircle(SPR.amit, gs+g.w/2, gy2+g.w/2, g.w/2, '#3498db');
+        ctx.shadowBlur=0;
+        ctx.fillStyle='#00ff88'; txt('AMIT!',gs+g.w/2,gy2+g.h+18,13,'#00ff88');
+        txt('BFF ❤️',gs+g.w/2,gy2+g.h+33,11,'#00ff88');
+      } else {
+        ctx.globalAlpha=0.35;
+        faceCircle(SPR.amit, gs+g.w/2, gy2+g.w/2, g.w/2, '#3498db');
+        ctx.globalAlpha=1;
+        txt(`💾 x${NEED}`,gs+g.w/2,gy2+g.h+18,12,'#555');
+      }
+    },
+
+    winCondition(p){return this.itemsCollected>=NEED&&overlap(p,AMIT);}
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 3: IT / PARTY PHASE
+// ─────────────────────────────────────────────────────────
+function mkS3() {
+  const WW=1900, WH=450;
+  const plats=[
+    {x:0,y:395,w:WW,h:55},
+    {x:170,y:315,w:140,h:15},{x:380,y:260,w:120,h:15},{x:560,y:305,w:120,h:15},
+    {x:740,y:250,w:120,h:15},{x:920,y:295,w:120,h:15},{x:1100,y:240,w:130,h:15},
+    {x:1280,y:285,w:120,h:15},{x:1460,y:235,w:130,h:15},{x:1640,y:295,w:150,h:15},
+    {x:1730,y:350,w:180,h:15},
+  ];
+  const itemXY=[[200,288],[415,232],[595,278],[775,222],[955,268],[1135,212],[1315,258],[1495,208],[1680,268]];
+  const items=itemXY.map(([x,y],i)=>({x,y,w:22,h:22,type:i%2===0?'laptop':'beer',collected:false,phase:Math.random()*Math.PI*2}));
+  const NEED=7;
+  const bugs=[
+    {x:300,y:372,vx:-2,w:28,h:28},{x:650,y:372,vx:3,w:28,h:28},
+    {x:1000,y:372,vx:-3,w:28,h:28},{x:1500,y:372,vx:2.5,w:28,h:28},
+  ];
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:'💻 Stage 4: IT & PARTY TIME',
+    storyLines:['Omry codes by day. Parties by night. Sleeps... occasionally.','He fixes bugs at 3am and finds the party at 4am.','Same energy, different problems.','Collect 7 laptops/beers. Avoid the bugs! 🐛'],
+    winTitle:'🎉 WORK HARD, PARTY HARDER!', winLines:["Omry's git commit messages at 4am are legendary.","They are incomprehensible. He is proud."],
+    goal:{x:1810,y:318,w:90,h:78},
+
+    init(){this.itemsCollected=0;items.forEach(i=>i.collected=false);},
+
+    update(p){
+      for(const b of bugs){
+        b.x+=b.vx;
+        if(b.x<30||b.x>WW-80)b.vx*=-1;
+        if(p.invincible===0&&overlap(p,b)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<b.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      for(const it of items){
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(it.type==='laptop'?`💻 Laptop! ${this.itemsCollected}/${NEED}`:`🍺 Beer! ${this.itemsCollected}/${NEED}`);}
+      }
+    },
+
+    draw(cam){
+      const t=Date.now()*0.001;
+      // Items
+      for(const it of items){
+        if(it.collected)continue;
+        const sx=it.x-cam.x, sy=it.y-cam.y+Math.sin(t*2.5+it.phase)*3;
+        if(it.type==='laptop'){
+          ctx.fillStyle='#95a5a6'; ctx.fillRect(sx,sy+8,22,14);
+          ctx.fillStyle='#2c3e50'; ctx.fillRect(sx+2,sy+10,18,10);
+          ctx.fillStyle='#3498db'; ctx.fillRect(sx+3,sy+11,16,8);
+          ctx.fillStyle='#7f8c8d'; ctx.fillRect(sx-2,sy+22,26,3);
+        } else {
+          ctx.fillStyle='#f39c12'; ctx.beginPath(); ctx.roundRect(sx+3,sy+6,16,16,3); ctx.fill();
+          ctx.fillStyle='#e67e22'; ctx.fillRect(sx+5,sy+4,12,5);
+          ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(sx+9,sy+12,4,0,Math.PI*2); ctx.fill();
+        }
+      }
+      // Bugs
+      for(const b of bugs){
+        const sx=b.x-cam.x, sy=b.y-cam.y;
+        ctx.fillStyle='#6c5ce7';
+        ctx.save(); ctx.translate(sx+14,sy+14);
+        ctx.beginPath(); ctx.ellipse(0,0,12,8,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#a29bfe';
+        ctx.beginPath(); ctx.arc(0,-3,7,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#333';
+        ctx.beginPath(); ctx.arc(-3,-4,2,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3,-4,2,0,Math.PI*2); ctx.fill();
+        // Legs
+        ctx.strokeStyle='#6c5ce7'; ctx.lineWidth=2;
+        for(let i=-1;i<=1;i+=1){ctx.beginPath();ctx.moveTo(-12,i*4);ctx.lineTo(-20,i*4-5);ctx.stroke();}
+        for(let i=-1;i<=1;i+=1){ctx.beginPath();ctx.moveTo(12,i*4);ctx.lineTo(20,i*4-5);ctx.stroke();}
+        ctx.restore();
+      }
+      // Goal
+      const g=this.goal, gs=g.x-cam.x, gy2=g.y-cam.y;
+      const rdy=this.itemsCollected>=NEED;
+      ctx.fillStyle=rdy?flash(Date.now()*0.001,'#e94560','#533483',3):'#333';
+      ctx.fillRect(gs,gy2,g.w,g.h);
+      txt(rdy?'🎉PARTY!':'x'+NEED,gs+g.w/2,gy2+g.h/2+6,12,rdy?'#fff':'#666');
+    },
+
+    winCondition(p){return this.itemsCollected>=NEED&&overlap(p,this.goal);}
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 4: RINAT'S WEDDING — OMRY MEETS HADAS
+// ─────────────────────────────────────────────────────────
+function mkS4() {
+  const WW=1800, WH=450;
+  // Wedding venue: red carpet ground, cake-tier platforms, chairs
+  const plats=[
+    {x:0,y:395,w:WW,h:55},       // red carpet
+    {x:180,y:320,w:110,h:15},{x:350,y:265,w:100,h:15},{x:520,y:305,w:110,h:15},
+    {x:700,y:250,w:110,h:15},{x:870,y:290,w:110,h:15},{x:1050,y:238,w:120,h:15},
+    {x:1230,y:278,w:110,h:15},{x:1400,y:228,w:120,h:15},{x:1580,y:285,w:150,h:15},
+    {x:1720,y:342,w:180,h:15},
+  ];
+  const itemXY=[[210,295],[385,240],[555,280],[735,225],[905,265],[1085,213],[1265,253],[1435,203],[1615,260]];
+  const items=itemXY.map(([x,y])=>({x,y,w:22,h:22,type:'heart',collected:false,phase:Math.random()*Math.PI*2}));
+  const NEED=8;
+  // Rinat is at the START — it's her wedding, she greets you at the entrance!
+  const RINAT={x:90,y:302,w:64,h:64};
+  // Hadas is at the END of the level — Omry spots her across the dance floor
+  const HADAS={x:1640,y:218,w:64,h:64};
+  // Drunk wedding guest enemies
+  const guests=[
+    {x:400,y:372,vx:-2,w:34,h:42},{x:850,y:372,vx:2.5,w:34,h:42},
+    {x:1350,y:372,vx:-2,w:34,h:42},
+  ];
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:"💒 Rinat's Wedding",
+    storyLines:["Omry gets invited to Rinat's wedding. 💒","Free food. Open bar. What could go wrong?","Then across the dance floor... he sees her. HADAS. 💕","Collect 8 hearts, dodge the drunk guests, find Hadas!"],
+    winTitle:'💖 LOVE AT FIRST PLATFORM!', winLines:["Omry's heart.exe has crashed — in the best way.","He owes Rinat his entire love life. Forever."],
+    goal:HADAS,
+
+    init(){this.itemsCollected=0;items.forEach(i=>i.collected=false);},
+
+    update(p){
+      for(const g of guests){
+        g.x+=g.vx;
+        if(g.x<30||g.x>WW-80)g.vx*=-1;
+        if(p.invincible===0&&overlap(p,g)){p.lives--;p.invincible=90;p.vy=-8;p.vx=(p.x<g.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      for(const it of items){
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(`💕 ${this.itemsCollected}/${NEED}`);}
+      }
+    },
+
+    draw(cam){
+      const t=Date.now()*0.001;
+
+      // ── Rinat at the ENTRANCE (beginning of level) ──
+      const rg=RINAT, rs=rg.x-cam.x, ry2=rg.y-cam.y;
+      // Wedding arch
+      ctx.strokeStyle='#ffd700'; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.arc(rs+rg.w/2, ry2-10, 55, Math.PI, 0); ctx.stroke();
+      // Flower decorations on arch
+      ['#ff69b4','#ff4444','#ff69b4'].forEach((col,i)=>{
+        const ang = Math.PI + (i+1)*Math.PI/4;
+        const fx = rs+rg.w/2 + Math.cos(ang)*55, fy = ry2-10 + Math.sin(ang)*55;
+        ctx.fillStyle=col; ctx.beginPath(); ctx.arc(fx,fy,6,0,Math.PI*2); ctx.fill();
+      });
+      ctx.shadowColor='#fff'; ctx.shadowBlur=12;
+      faceCircle(SPR.rinat, rs+rg.w/2, ry2+rg.w/2, rg.w/2, '#e91e63');
+      ctx.shadowBlur=0;
+      txt('👰 Rinat', rs+rg.w/2, ry2+rg.h+16, 12, '#ffd700');
+      txt("It's her wedding!", rs+rg.w/2, ry2+rg.h+30, 9, 'rgba(255,255,255,0.7)');
+
+      // ── Hearts ──
+      for(const it of items){
+        if(it.collected)continue;
+        const sx=it.x-cam.x, sy=it.y-cam.y+Math.sin(t*2.8+it.phase)*4;
+        ctx.fillStyle='#e91e63';
+        ctx.save(); ctx.translate(sx+11,sy+11); heart(0,0,9); ctx.restore();
+      }
+
+      // ── Drunk wedding guests ──
+      for(const g of guests){
+        const sx=g.x-cam.x, sy=g.y-cam.y;
+        const sway=Math.sin(t*3+g.x)*0.15;
+        ctx.save(); ctx.translate(sx+17,sy+21); ctx.rotate(sway);
+        ctx.fillStyle='#2c3e50'; ctx.fillRect(-12,-20,24,22);
+        ctx.fillStyle='#f5cba7'; ctx.beginPath(); ctx.arc(0,-28,12,0,Math.PI*2); ctx.fill();
+        ctx.font='14px Arial'; ctx.textAlign='center'; ctx.fillText('🍺',0,-22);
+        ctx.restore();
+      }
+
+      // ── Hadas at the END — always drawn, glows when reachable ──
+      const hg=HADAS, hgs=hg.x-cam.x, hgy=hg.y-cam.y;
+      const rdy=this.itemsCollected>=NEED;
+      // Spotlight / glow background
+      const glowR = rdy ? 50+Math.sin(t*4)*8 : 42;
+      ctx.fillStyle=rdy?'rgba(255,105,180,0.18)':'rgba(200,200,200,0.1)';
+      ctx.beginPath(); ctx.arc(hgs+hg.w/2, hgy+hg.w/2, glowR, 0, Math.PI*2); ctx.fill();
+      ctx.shadowColor=rdy?'#ff69b4':'transparent'; ctx.shadowBlur=rdy?24:0;
+      faceCircle(SPR.hadas, hgs+hg.w/2, hgy+hg.w/2, hg.w/2, '#e91e63');
+      ctx.shadowBlur=0;
+      if(rdy){
+        txt('HADAS! 💕', hgs+hg.w/2, hgy+hg.h+18, 13, '#ff1493');
+        // Arrow pointing to her
+        ctx.fillStyle='#ff1493'; ctx.font='20px Arial'; ctx.textAlign='center';
+        ctx.fillText('▼', hgs+hg.w/2, hgy-12+Math.sin(t*4)*5);
+      } else {
+        txt('???', hgs+hg.w/2, hgy+hg.h/2+6, 14, 'rgba(180,180,180,0.6)');
+        txt(`💕 ${this.itemsCollected}/${NEED}`, hgs+hg.w/2, hgy+hg.h+18, 12, '#c2185b');
+      }
+    },
+
+    winCondition(p){return this.itemsCollected>=NEED&&overlap(p,HADAS);}
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 5: THE WEDDING
+// ─────────────────────────────────────────────────────────
+function mkS5() {
+  const WW=1600, WH=450;
+  const plats=[
+    {x:0,y:395,w:WW,h:55},       // Red carpet aisle (ground)
+    {x:200,y:320,w:110,h:15},{x:380,y:265,w:100,h:15},
+    {x:560,y:305,w:110,h:15},{x:730,y:255,w:110,h:15},
+    {x:900,y:295,w:110,h:15},{x:1070,y:245,w:120,h:15},
+    {x:1250,y:290,w:110,h:15},{x:1430,y:348,w:160,h:15},
+  ];
+  const ringXY=[[240,295],[420,240],[600,280],[770,230],[940,270],[1110,220],[1290,265]];
+  const rings=ringXY.map(([x,y])=>({x,y,w:20,h:20,type:'ring',collected:false,phase:Math.random()*Math.PI*2}));
+  const NEED=5;
+  const exes=[
+    {x:400,y:372,vx:-3,w:34,h:40},{x:900,y:372,vx:3.5,w:34,h:40},
+  ];
+  const hadasGoal={x:1490,y:295,w:64,h:100};
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:'💍 Stage 6: THE WEDDING',
+    storyLines:['The big day has arrived!','Omry walks down the aisle in his finest suit.','Watch out for the exes trying to stop him! 😤','Collect 5 rings and reach Hadas at the altar!'],
+    winTitle:'💍 THEY DO! THEY DO!', winLines:['Omry and Hadas are MARRIED!','The guests cry. Amit ugly-cries. It is beautiful.'],
+    goal:hadasGoal,
+
+    init(){this.itemsCollected=0;rings.forEach(r=>r.collected=false);},
+
+    update(p){
+      for(const e of exes){
+        e.x+=e.vx;
+        if(e.x<30||e.x>WW-80)e.vx*=-1;
+        if(p.invincible===0&&overlap(p,e)){p.lives--;p.invincible=90;p.vy=-8;p.vx=(p.x<e.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      for(const r of rings){
+        if(!r.collected&&overlap(p,r)){r.collected=true;this.itemsCollected++;score+=100;showMsg(`💍 Ring! ${this.itemsCollected}/${NEED}`);}
+      }
+    },
+
+    draw(cam){
+      const t=Date.now()*0.001;
+      // Rings
+      for(const r of rings){
+        if(r.collected)continue;
+        const sx=r.x-cam.x, sy=r.y-cam.y+Math.sin(t*2.5+r.phase)*3;
+        ctx.strokeStyle='#ffd700'; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.arc(sx+10,sy+10,8,0,Math.PI*2); ctx.stroke();
+        ctx.fillStyle='rgba(255,215,0,0.25)'; ctx.beginPath(); ctx.arc(sx+10,sy+10,8,0,Math.PI*2); ctx.fill();
+      }
+      // Exes (bitter, grey)
+      for(const e of exes){
+        const sx=e.x-cam.x, sy=e.y-cam.y;
+        ctx.fillStyle='#7f8c8d';
+        ctx.fillRect(sx+5,sy+22,e.w-10,e.h-22);
+        ctx.beginPath(); ctx.arc(sx+e.w/2,sy+14,13,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#e74c3c'; ctx.font='12px Arial'; ctx.textAlign='center'; ctx.fillText('😤',sx+e.w/2,sy+20);
+      }
+      // Hadas at altar
+      const g=hadasGoal, gs=g.x-cam.x, gy2=g.y-cam.y;
+      const rdy=this.itemsCollected>=NEED;
+      // Altar arch
+      ctx.strokeStyle='#ffd700'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.arc(gs+g.w/2,gy2+20,50,Math.PI,0); ctx.stroke();
+      if(rdy){
+        ctx.shadowColor='#ff69b4'; ctx.shadowBlur=20;
+        faceCircle(SPR.hadas, gs+g.w/2, gy2+42, g.w/2-2, '#e91e63');
+        ctx.shadowBlur=0;
+        txt('💒 I DO!',gs+g.w/2,gy2+g.h+18,13,'#ffd700');
+      } else {
+        ctx.globalAlpha=0.4;
+        faceCircle(SPR.hadas, gs+g.w/2, gy2+42, g.w/2-2, '#e91e63');
+        ctx.globalAlpha=1;
+        txt(`💍 x${NEED}`,gs+g.w/2,gy2+g.h+18,12,'#888');
+      }
+    },
+
+    winCondition(p){return this.itemsCollected>=NEED&&overlap(p,hadasGoal);}
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 6: BABY DANIEL
+// ─────────────────────────────────────────────────────────
+function mkS6() {
+  const WW=1800, WH=450;
+  const plats=[
+    {x:0,y:395,w:WW,h:55},
+    {x:180,y:320,w:120,h:15},{x:360,y:265,w:110,h:15},{x:540,y:305,w:120,h:15},
+    {x:720,y:250,w:110,h:15},{x:890,y:295,w:110,h:15},{x:1060,y:240,w:120,h:15},
+    {x:1240,y:285,w:110,h:15},{x:1420,y:230,w:120,h:15},{x:1600,y:290,w:150,h:15},
+    {x:1720,y:348,w:180,h:15},
+  ];
+  const itemXY=[[210,295],[395,240],[575,280],[755,225],[925,270],[1095,215],[1275,260],[1455,205],[1635,265]];
+  const items=itemXY.map(([x,y],i)=>({x,y,w:20,h:24,type:i%2===0?'diaper':'milk',collected:false,phase:Math.random()*Math.PI*2}));
+  const NEED=7;
+  const zzzMonsters=[
+    {x:400,y:200,vx:1.2,vy:0.8,w:36,h:36},{x:700,y:150,vx:-1.5,vy:1,w:36,h:36},
+    {x:1050,y:180,vx:1.3,vy:-0.9,w:36,h:36},{x:1450,y:160,vx:-1.2,vy:0.8,w:36,h:36},
+  ];
+
+  return {
+    worldW:WW, worldH:WH, spawnX:60, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:NEED,
+    storyTitle:'👶 Stage 7: BABY DANIEL!',
+    storyLines:['DANIEL HAS ARRIVED! 8 pounds of chaos.','Omry and Hadas have not slept in 3 days.','The sleep deprivation monsters are EVERYWHERE.','Collect 7 diapers/milk and dodge the ZZZ monsters! 😴'],
+    winTitle:"👶 DANIEL'S FIRST YEAR!", winLines:["Daniel's first word: 'dada'","Omry cried for 20 minutes. He's not ashamed."],
+    goal:{x:1720,y:316,w:90,h:80},
+
+    init(){this.itemsCollected=0;items.forEach(i=>i.collected=false);},
+
+    update(p){
+      for(const z of zzzMonsters){
+        z.x+=z.vx; z.y+=z.vy;
+        if(z.x<20||z.x>WW-70)z.vx*=-1;
+        if(z.y<50||z.y>300)z.vy*=-1;
+        if(p.invincible===0&&overlap(p,z)){p.lives--;p.invincible=90;p.vy=-9;p.vx=(p.x<z.x)?-5:5;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      for(const it of items){
+        if(!it.collected&&overlap(p,it)){it.collected=true;this.itemsCollected++;score+=100;showMsg(it.type==='diaper'?`🚼 Diaper! ${this.itemsCollected}/${NEED}`:`🍼 Milk! ${this.itemsCollected}/${NEED}`);}
+      }
+    },
+
+    draw(cam){
+      const t=Date.now()*0.001;
+      // Items
+      for(const it of items){
+        if(it.collected)continue;
+        const sx=it.x-cam.x, sy=it.y-cam.y+Math.sin(t*2+it.phase)*3;
+        if(it.type==='diaper'){
+          ctx.fillStyle='#fff'; ctx.beginPath(); ctx.roundRect(sx+1,sy+4,18,16,5); ctx.fill();
+          ctx.fillStyle='#90caf9'; ctx.fillRect(sx+3,sy+4,14,4);
+          ctx.fillStyle='#64b5f6'; ctx.fillRect(sx+1,sy+4,4,4);ctx.fillRect(sx+15,sy+4,4,4);
+        } else {
+          ctx.fillStyle='#fff'; ctx.beginPath(); ctx.roundRect(sx+4,sy+4,12,18,3); ctx.fill();
+          ctx.fillStyle='#f8bbd0'; ctx.beginPath(); ctx.arc(sx+10,sy+5,8,Math.PI,0); ctx.fill();
+          ctx.fillStyle='#f48fb1'; ctx.fillRect(sx+7,sy,6,6);
+        }
+      }
+      // ZZZ monsters
+      for(const z of zzzMonsters){
+        const sx=z.x-cam.x, sy=z.y-cam.y;
+        ctx.fillStyle='#7986cb';
+        ctx.save(); ctx.translate(sx+18,sy+18);
+        ctx.beginPath(); ctx.ellipse(0,0,16,12,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(-5,-3,5,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(5,-3,5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#5c6bc0'; ctx.font='bold 11px Arial'; ctx.textAlign='center';
+        ctx.fillText('z',14,-18); ctx.fillText('z',22,-28); ctx.fillText('z',30,-38);
+        ctx.restore();
+      }
+      // Goal: baby crib
+      const g=this.goal, gs=g.x-cam.x, gy2=g.y-cam.y;
+      const rdy=this.itemsCollected>=NEED;
+      ctx.fillStyle=rdy?flash(Date.now()*0.001,'#42a5f5','#90caf9',3):'#aaa';
+      ctx.fillRect(gs,gy2,g.w,g.h);
+      ctx.font='28px Arial'; ctx.textAlign='center';
+      ctx.fillText('🛏️',gs+g.w/2,gy2+g.h*0.6);
+      txt(rdy?'CRIB!':'x'+NEED,gs+g.w/2,gy2+g.h-8,11,rdy?'#0d47a1':'#666');
+    },
+
+    winCondition(p){return this.itemsCollected>=NEED&&overlap(p,this.goal);}
+  };
+}
+
+// ─────────────────────────────────────────────────────────
+//  STAGE 7: BIRTHDAY MISSILE DODGE
+// ─────────────────────────────────────────────────────────
+function mkS7() {
+  const WW=GW, WH=GH;
+  const plats=[
+    {x:0,y:395,w:WW,h:55},
+    {x:80,y:310,w:160,h:15},{x:330,y:270,w:150,h:15},{x:570,y:310,w:160,h:15},
+    {x:180,y:220,w:130,h:15},{x:450,y:190,w:120,h:15},{x:640,y:230,w:130,h:15},
+  ];
+  let missiles=[], cakes=[], spawnTimer=0, cakeTimer=0;
+  const SURVIVE=30;
+
+  return {
+    worldW:WW, worldH:WH, spawnX:GW/2-18, spawnY:340, platforms:plats,
+    itemsCollected:0, itemsNeeded:0,
+    survivalTimer:0, survivalDuration:SURVIVE*60,
+    storyTitle:'🎂 Stage 8: BIRTHDAY CHAOS!',
+    storyLines:['Happy Birthday Omry! 🎂','Unfortunately, someone ordered MISSILES instead of fireworks.','Dodge the missiles! Collect the birthday cake slices!','Survive 30 seconds to WIN! 🚀🎂'],
+    winTitle:'🎂 HAPPY BIRTHDAY OMRY!!', winLines:['You survived! You dodged missiles! You are a legend!','Another year older. Still platforming. Still winning.'],
+    goal:null,
+
+    init(){missiles=[];cakes=[];spawnTimer=0;cakeTimer=0;this.survivalTimer=0;this.itemsCollected=0;},
+
+    update(p){
+      this.survivalTimer++;
+      spawnTimer++;
+      cakeTimer++;
+
+      // Spawn missiles
+      const rate=Math.max(30,90-Math.floor(this.survivalTimer/120)*8);
+      if(spawnTimer>=rate){
+        spawnTimer=0;
+        missiles.push({x:Math.random()*(GW-30)+15, y:-40, vy:3+Math.random()*3, w:16,h:40, explode:0});
+      }
+
+      // Spawn cakes
+      if(cakeTimer>=200){cakeTimer=0;cakes.push({x:Math.random()*(GW-30)+15,y:-20,vy:2,w:24,h:24,collected:false});}
+
+      // Update missiles
+      for(const m of missiles){
+        if(m.explode>0){m.explode++;continue;}
+        m.y+=m.vy;
+        // Only explode on the ground (y>=390), never on platforms
+        if(m.y+m.h>=390){m.explode=1;continue;}
+        // Hit player
+        if(p.invincible===0&&overlap(p,m)){m.explode=1;p.lives--;p.invincible=90;p.vy=-10;p.vx=(p.x<m.x)?-7:7;if(p.lives<=0){GS='dead';deadTimer=90;}}
+      }
+      missiles=missiles.filter(m=>m.explode<30);
+
+      // Update cakes
+      for(const c of cakes){
+        c.y+=c.vy;
+        if(!c.collected&&overlap(p,c)){c.collected=true;this.itemsCollected++;score+=200;showMsg(`🎂 Cake! +200pts x${this.itemsCollected}`);}
+      }
+      cakes=cakes.filter(c=>!c.collected&&c.y<GH+30);
+    },
+
+    draw(cam){
+      const t=Date.now()*0.001;
+      // Missiles
+      for(const m of missiles){
+        const sx=m.x-cam.x, sy=m.y-cam.y;
+        if(m.explode>0){
+          const r=m.explode*5;
+          ctx.globalAlpha=Math.max(0,1-m.explode/30);
+          ctx.fillStyle='#f39c12'; ctx.beginPath(); ctx.arc(sx+8,sy+m.h/2,r,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#e74c3c'; ctx.beginPath(); ctx.arc(sx+8,sy+m.h/2,r*0.6,0,Math.PI*2); ctx.fill();
+          ctx.globalAlpha=1; continue;
+        }
+        // Missile body
+        ctx.fillStyle='#95a5a6'; ctx.fillRect(sx,sy+10,16,30);
+        ctx.fillStyle='#e74c3c';
+        ctx.beginPath(); ctx.moveTo(sx,sy+10); ctx.lineTo(sx+16,sy+10); ctx.lineTo(sx+8,sy); ctx.fill();
+        ctx.fillStyle='#f39c12';
+        ctx.beginPath(); ctx.moveTo(sx+2,sy+40); ctx.lineTo(sx-4,sy+50); ctx.lineTo(sx+8,sy+40); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(sx+14,sy+40); ctx.lineTo(sx+20,sy+50); ctx.lineTo(sx+8,sy+40); ctx.fill();
+        // Flame
+        if(Math.floor(t*8)%2){
+          ctx.fillStyle='#f39c12'; ctx.beginPath(); ctx.arc(sx+8,sy+48,5+Math.random()*4,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(sx+8,sy+48,2+Math.random()*2,0,Math.PI*2); ctx.fill();
+        }
+      }
+      // Cakes
+      for(const c of cakes){
+        if(c.collected)continue;
+        const sx=c.x-cam.x, sy=c.y-cam.y;
+        ctx.fillStyle='#f39c12'; ctx.fillRect(sx,sy+8,24,16);
+        ctx.fillStyle='#fff'; ctx.fillRect(sx+2,sy+10,20,12);
+        ctx.fillStyle='#e74c3c'; ctx.fillRect(sx+2,sy+8,20,4);
+        ctx.fillStyle='#f39c12'; ctx.fillRect(sx+10,sy+1,4,8);
+        ctx.fillStyle='#ffeb3b'; ctx.beginPath(); ctx.arc(sx+12,sy+1,3,0,Math.PI*2); ctx.fill();
+      }
+      // Survival timer (drawn in HUD)
+    },
+
+    winCondition(p){return this.survivalTimer>=this.survivalDuration;}
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HUD
+// ═══════════════════════════════════════════════════════════
+function drawHUD() {
+  if(!P||!STAGE) return;
+  const cl=pal(), t=Date.now()*0.001;
+
+  // Lives
+  ctx.font='18px Arial'; ctx.textAlign='left';
+  for(let i=0;i<3;i++){
+    ctx.globalAlpha=(i<P.lives)?1:0.25;
+    ctx.fillText('❤️',10+i*26,26);
+  }
+  ctx.globalAlpha=1;
+
+  // Stage
+  ctx.fillStyle=cl.txt; ctx.font='bold 13px Courier New'; ctx.textAlign='center';
+  ctx.fillText(`STAGE ${stageIdx+1} / 8`, GW/2, 20);
+
+  // Score (top right)
+  ctx.textAlign='right'; ctx.fillStyle='#FFD700'; ctx.font='bold 14px Courier New';
+  ctx.fillText(`⭐ ${score.toLocaleString()}`, GW-10, 20);
+
+  // Items collected (below score)
+  if(STAGE.itemsNeeded>0){
+    ctx.fillStyle=cl.txt; ctx.font='12px Courier New';
+    ctx.fillText(`${STAGE.itemsCollected||0}/${STAGE.itemsNeeded}`,GW-10,38);
+  }
+
+  // Stage 7 timer
+  if(stageIdx===7&&STAGE.survivalDuration){
+    const remain=Math.max(0,Math.ceil((STAGE.survivalDuration-STAGE.survivalTimer)/60));
+    ctx.fillStyle=remain<10?'#e74c3c':'#f39c12';
+    ctx.font='bold 26px Courier New'; ctx.textAlign='center';
+    ctx.fillText(`⏱ ${remain}s`,GW/2,50);
+  }
+
+  // Floating message
+  if(msgTimer>0){
+    ctx.globalAlpha=Math.min(1,msgTimer/30)*0.95;
+    ctx.fillStyle='#FFD700'; ctx.font='bold 20px Courier New'; ctx.textAlign='center';
+    ctx.fillText(msgText,GW/2,GH/2-60);
+    ctx.globalAlpha=1; msgTimer--;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TOUCH CONTROLS
+// ═══════════════════════════════════════════════════════════
+function drawTouchCtrl() {
+  const btns=getBtns();
+  ctx.save();
+  for(const b of btns){
+    const active=(b.id==='left'&&TC.left)||(b.id==='right'&&TC.right)||(b.id==='jump'&&TC.jump);
+    ctx.fillStyle=active?'rgba(255,255,255,0.28)':'rgba(255,255,255,0.12)';
+    ctx.strokeStyle='rgba(255,255,255,0.45)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(b.x,b.y,b.w,b.h,12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.font=`bold 28px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    if(b.id==='left')  ctx.fillText('◀',b.x+b.w/2,b.y+b.h/2);
+    if(b.id==='right') ctx.fillText('▶',b.x+b.w/2,b.y+b.h/2);
+    if(b.id==='jump')  ctx.fillText('🅰',b.x+b.w/2,b.y+b.h/2);
+    ctx.textBaseline='alphabetic';
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  STORY SCREEN
+// ═══════════════════════════════════════════════════════════
+function drawStory() {
+  if(!STAGE) return;
+  const cl=pal(), t=Date.now()*0.001;
+  const bg=ctx.createLinearGradient(0,0,0,GH);
+  bg.addColorStop(0,cl.sky); bg.addColorStop(1,cl.sky2);
+  ctx.fillStyle=bg; ctx.fillRect(0,0,GW,GH);
+
+  // Title box
+  ctx.fillStyle='rgba(0,0,0,0.55)';
+  ctx.beginPath(); ctx.roundRect(GW/2-280,50,560,GH-100,18); ctx.fill();
+
+  ctx.fillStyle=cl.txt;
+  ctx.font=`bold ${clamp(22,5,34)}px Courier New`;
+  ctx.textAlign='center';
+  ctx.fillText(STAGE.storyTitle, GW/2, 115);
+
+  STAGE.storyLines.forEach((line,i)=>{
+    ctx.fillStyle='rgba(255,255,255,0.88)';
+    ctx.font=`${clamp(13,3,17)}px Courier New`;
+    ctx.fillText(line, GW/2, 165+i*38);
+  });
+
+  // Pulse prompt
+  ctx.globalAlpha=0.6+Math.sin(t*3)*0.3;
+  ctx.fillStyle='#FFD700';
+  ctx.font='bold 16px Courier New';
+  ctx.fillText('▶  TAP / PRESS SPACE TO PLAY  ◀', GW/2, GH-55);
+  ctx.globalAlpha=1;
+}
+
+function clamp(base,vwFactor,max) {
+  return Math.min(max, Math.max(base, Math.floor(window.innerWidth*vwFactor/100)));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  STAGE WIN SCREEN
+// ═══════════════════════════════════════════════════════════
+function drawStageWin() {
+  if(!STAGE) return;
+  const cl=pal(), t=Date.now()*0.001;
+  const bg=ctx.createLinearGradient(0,0,0,GH);
+  bg.addColorStop(0,cl.sky); bg.addColorStop(1,cl.sky2);
+  ctx.fillStyle=bg; ctx.fillRect(0,0,GW,GH);
+
+  // Confetti
+  const cols=['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c'];
+  for(let i=0;i<30;i++){
+    const x=(i*137+t*40*((i%3)+1))%GW;
+    const y=(i*97+t*30*((i%3)+1))%GH;
+    ctx.fillStyle=cols[i%6];
+    ctx.save(); ctx.translate(x,y); ctx.rotate(t*2+i);
+    ctx.fillRect(-5,-5,10,10); ctx.restore();
+  }
+
+  ctx.fillStyle='rgba(0,0,0,0.6)';
+  ctx.beginPath(); ctx.roundRect(GW/2-260,80,520,GH-160,18); ctx.fill();
+
+  ctx.font='bold 26px Courier New'; ctx.textAlign='center';
+  ctx.fillStyle='#FFD700';
+  ctx.fillText('✨ STAGE COMPLETE! ✨', GW/2, 125);
+
+  ctx.fillStyle='#fff'; ctx.font='bold 18px Courier New';
+  ctx.fillText(STAGE.winTitle, GW/2, 160);
+
+  // Score breakdown
+  ctx.fillStyle='#FFD700'; ctx.font='bold 14px Courier New';
+  ctx.fillText(`+${stageBonus} pts  (500 base + ${P?P.lives:0}×150 lives)`, GW/2, 188);
+  ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.font='13px Courier New';
+  ctx.fillText(`Total Score: ⭐ ${score.toLocaleString()}`, GW/2, 208);
+
+  STAGE.winLines.forEach((line,i)=>{
+    ctx.fillStyle='rgba(255,255,255,0.82)';
+    ctx.font='13px Courier New';
+    ctx.fillText(line, GW/2, 220+i*30);
+  });
+
+  ctx.globalAlpha=0.6+Math.sin(t*3)*0.3;
+  ctx.fillStyle='#FFD700'; ctx.font='bold 16px Courier New';
+  ctx.fillText('▶  TAP / PRESS SPACE TO CONTINUE  ◀', GW/2, GH-55);
+  ctx.globalAlpha=1;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DEAD SCREEN
+// ═══════════════════════════════════════════════════════════
+function drawDead() {
+  ctx.fillStyle='rgba(0,0,0,0.85)'; ctx.fillRect(0,0,GW,GH);
+  ctx.fillStyle='#e74c3c'; ctx.font='bold 36px Courier New'; ctx.textAlign='center';
+  ctx.fillText('💀 GAME OVER 💀', GW/2, GH/2-30);
+  ctx.fillStyle='#fff'; ctx.font='16px Courier New';
+  ctx.fillText('Omry will try again...', GW/2, GH/2+15);
+  ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='13px Courier New';
+  ctx.fillText('Restarting stage...', GW/2, GH/2+50);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FINAL WIN SCREEN
+// ═══════════════════════════════════════════════════════════
+function drawGameWin() {
+  const t=Date.now()*0.001;
+  // Gradient
+  const g=ctx.createLinearGradient(0,0,0,GH);
+  g.addColorStop(0,'#1a1a2e'); g.addColorStop(1,'#16213e');
+  ctx.fillStyle=g; ctx.fillRect(0,0,GW,GH);
+
+  // Confetti explosion
+  const cols=['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#e91e63','#1abc9c','#FFD700'];
+  for(let i=0;i<50;i++){
+    const x=(i*131+Math.sin(t*0.7+i*1.1)*60+t*20*((i%5)+1))%GW;
+    const y=(i*97+Math.cos(t*0.8+i*0.9)*40+t*25*(1+i%4))%GH;
+    ctx.fillStyle=cols[i%8];
+    ctx.save(); ctx.translate(x,y); ctx.rotate(t*3+i*0.5);
+    if(i%3===0){ctx.beginPath();ctx.arc(0,0,6,0,Math.PI*2);ctx.fill();}
+    else ctx.fillRect(-5,-5,10,10);
+    ctx.restore();
+  }
+
+  // Central card
+  ctx.fillStyle='rgba(0,0,0,0.75)';
+  ctx.beginPath(); ctx.roundRect(GW/2-300,20,600,GH-40,22); ctx.fill();
+
+  // Title
+  ctx.fillStyle='#FFD700'; ctx.font='bold 30px Courier New'; ctx.textAlign='center';
+  ctx.fillText('🎂 HAPPY BIRTHDAY OMRY! 🎂', GW/2, 72);
+
+  // Faces row
+  const faces=[
+    {spr:SPR.omry,  label:'Omry',    x:GW/2-190},
+    {spr:SPR.amit,  label:'Amit',    x:GW/2-65},
+    {spr:SPR.hadas, label:'Hadas',   x:GW/2+65},
+    {spr:SPR.rinat, label:'Rinat 👰', x:GW/2+190},
+  ];
+  faces.forEach(f=>{
+    faceCircle(f.spr, f.x, 138, 34, '#555');
+    ctx.fillStyle='#fff'; ctx.font='bold 11px Courier New'; ctx.textAlign='center';
+    ctx.fillText(f.label, f.x, 182);
+  });
+
+  // Baby Daniel
+  ctx.font='28px Arial'; ctx.textAlign='center';
+  ctx.fillText('👶', GW/2, 222);
+  ctx.fillStyle='#90caf9'; ctx.font='bold 11px Courier New';
+  ctx.fillText('Daniel', GW/2, 238);
+
+  // ── FINAL SCORE ──
+  const rating = score>=10000?'S 🌟':score>=7000?'A 🥇':score>=5000?'B 🥈':score>=3000?'C 🥉':'D 😅';
+  const ratingCol = score>=10000?'#FFD700':score>=7000?'#f39c12':score>=5000?'#bdc3c7':score>=3000?'#cd7f32':'#95a5a6';
+
+  ctx.fillStyle='rgba(255,255,255,0.08)';
+  ctx.beginPath(); ctx.roundRect(GW/2-240,248,480,90,12); ctx.fill();
+
+  ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.font='12px Courier New'; ctx.textAlign='center';
+  ctx.fillText('FINAL SCORE', GW/2, 270);
+  ctx.fillStyle='#FFD700'; ctx.font='bold 34px Courier New';
+  ctx.fillText(`⭐ ${score.toLocaleString()}`, GW/2, 308);
+  ctx.fillStyle=ratingCol; ctx.font='bold 18px Courier New';
+  ctx.fillText(`RANK: ${rating}`, GW/2, 330);
+
+  // ── Journey ──
+  ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.font='12px Courier New';
+  ctx.fillText('Baby → Emo → Army → IT → Rinat\'s Wedding → Married → Daniel', GW/2, 360);
+  ctx.fillText("You're a legend. Happy Birthday! 🎂❤️", GW/2, 380);
+
+  // Score guide (small)
+  ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.font='10px Courier New';
+  ctx.fillText('Items: +100pt  Stage clear: +500pt  Lives bonus: +150pt each  Missile cake: +200pt', GW/2, 402);
+
+  // Pulse
+  ctx.globalAlpha=0.5+Math.abs(Math.sin(t*2))*0.5;
+  ctx.fillStyle='#FFD700'; ctx.font='bold 18px Courier New';
+  ctx.fillText('🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉', GW/2, 432);
+  ctx.globalAlpha=1;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MAIN GAME LOOP
+// ═══════════════════════════════════════════════════════════
+function gameLoop() {
+  requestAnimationFrame(gameLoop);
+
+  // Apply canvas transform for scaling
+  ctx.setTransform(scale, 0, 0, scale, ox, oy);
+  ctx.clearRect(0, 0, GW, GH);
+
+  switch(GS) {
+    case 'upload':
+      // HTML overlay handles this; just draw a dark bg
+      ctx.fillStyle='#111'; ctx.fillRect(0,0,GW,GH);
+      break;
+
+    case 'story':
+      storyTimer++;
+      drawStory();
+      break;
+
+    case 'playing':
+      updatePlayer();
+      if(STAGE) STAGE.update(P);
+      updateCam();
+
+      // Check win
+      if(STAGE && STAGE.winCondition(P)) {
+        // Stage complete bonus: 500 base + 150 per life remaining
+        stageBonus = 500 + (P.lives * 150);
+        score += stageBonus;
+        GS='stage_win'; winTimer=0;
+      }
+
+      drawBG();
+      drawPlatforms();
+      if(STAGE) STAGE.draw(CAM);
+      drawPlayer();
+      drawHUD();
+      drawTouchCtrl();
+      break;
+
+    case 'dead':
+      deadTimer--;
+      drawBG();
+      drawPlatforms();
+      drawPlayer();
+      drawDead();
+      if(deadTimer<=0){
+        // Restart stage
+        STAGE.init();
+        P=mkPlayer(STAGE.spawnX, STAGE.spawnY);
+        GS='playing';
+      }
+      break;
+
+    case 'stage_win':
+      winTimer++;
+      drawStageWin();
+      break;
+
+    case 'game_win':
+      winTimer++;
+      drawGameWin();
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EVENT HANDLERS
+// ═══════════════════════════════════════════════════════════
+document.getElementById('b0').addEventListener('click', () => {
+  hideOverlays();
+  startStage(0);
+});
+
+// ═══════════════════════════════════════════════════════════
+//  START
+// ═══════════════════════════════════════════════════════════
+gameLoop();
+</script>
+</body>
+</html>
