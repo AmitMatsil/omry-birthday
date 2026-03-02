@@ -313,30 +313,46 @@ function flash(t, a, b, rate) { return Math.floor(t * rate) % 2 === 0 ? a : b; }
 // ═══════════════════════════════════════════════════════════
 //  AUDIO / SFX
 // ═══════════════════════════════════════════════════════════
+const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 let audioCtx = null;
 function getAC() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
 }
-function tone(freq, type, dur, vol, delay) {
+const SFX_B = {};
+function playBuf(name, act, dur) {
   try {
     const ac = getAC();
-    const o = ac.createOscillator(), g = ac.createGain();
-    o.connect(g); g.connect(ac.destination);
-    o.type = type || 'sine';
-    const t0 = ac.currentTime + (delay || 0);
-    o.frequency.setValueAtTime(freq, t0);
-    g.gain.setValueAtTime(vol || 0.25, t0);
-    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
-    o.start(t0); o.stop(t0 + dur);
+    if (!SFX_B[name]) {
+      const sr = ac.sampleRate || 44100;
+      const len = Math.floor(sr * dur);
+      const b = ac.createBuffer(1, len, sr);
+      const d = b.getChannelData(0);
+      for (const a of act) {
+        const t0 = Math.floor((a.d || 0) * sr);
+        const slen = Math.floor(a.dur * sr);
+        const dec = Math.pow(0.001 / a.v, 1 / slen);
+        let vol = a.v;
+        for (let i = 0; i < slen && t0 + i < len; i++) {
+          const t = i / sr;
+          d[t0 + i] += (a.t === 'sine' ? Math.sin(2 * Math.PI * a.f * t) : 2 * (t * a.f - Math.floor(t * a.f + 0.5))) * vol;
+          vol *= dec;
+        }
+      }
+      SFX_B[name] = b;
+    }
+    const s = ac.createBufferSource();
+    s.buffer = SFX_B[name];
+    s.connect(ac.destination);
+    s.start();
   } catch(e) {}
 }
-function sfxJump()     { tone(330,'sine',0.09,0.22); tone(520,'sine',0.08,0.18,0.07); }
-function sfxCollect()  { tone(880,'sine',0.07,0.28); tone(1100,'sine',0.09,0.22,0.05); tone(1320,'sine',0.07,0.18,0.10); }
-function sfxHit()      { tone(200,'sawtooth',0.15,0.35); tone(130,'sawtooth',0.12,0.3,0.1); }
-function sfxFall()     { tone(220,'sawtooth',0.08,0.3); tone(180,'sawtooth',0.1,0.25,0.08); }
-function sfxStageWin() { [523,659,784,1047].forEach((f,i)=>tone(f,'sine',0.22,0.28,i*0.11)); }
-function sfxGameOver() { [440,349,277,220].forEach((f,i)=>tone(f,'sawtooth',0.22,0.32,i*0.14)); }
+function sfxJump()     { playBuf('j', [{f:330,t:'sine',dur:0.09,v:0.22}, {f:520,t:'sine',dur:0.08,v:0.18,d:0.07}], 0.2); }
+function sfxCollect()  { playBuf('c', [{f:880,t:'sine',dur:0.07,v:0.28}, {f:1100,t:'sine',dur:0.09,v:0.22,d:0.05}, {f:1320,t:'sine',dur:0.07,v:0.18,d:0.10}], 0.25); }
+function sfxHit()      { playBuf('h', [{f:200,t:'sawtooth',dur:0.15,v:0.35}, {f:130,t:'sawtooth',dur:0.12,v:0.3,d:0.1}], 0.3); }
+function sfxFall()     { playBuf('f', [{f:220,t:'sawtooth',dur:0.08,v:0.3}, {f:180,t:'sawtooth',dur:0.1,v:0.25,d:0.08}], 0.25); }
+function sfxStageWin() { playBuf('w', [523,659,784,1047].map((f,i)=>({f,t:'sine',dur:0.22,v:0.28,d:i*0.11})), 0.6); }
+function sfxGameOver() { playBuf('o', [440,349,277,220].map((f,i)=>({f,t:'sawtooth',dur:0.22,v:0.32,d:i*0.14})), 0.8); }
 
 // ═══════════════════════════════════════════════════════════
 //  PALETTES
@@ -902,9 +918,9 @@ function mkS2() {
       const rdy=this.itemsCollected>=NEED;
       if(rdy){
         // Glow
-        ctx.shadowColor='#00ff88'; ctx.shadowBlur=18;
+        ctx.shadowColor='#00ff88'; if (!isIOS) ctx.shadowBlur=18;
         faceCircle(SPR.amit, gs+g.w/2, gy2+g.w/2, g.w/2, '#3498db');
-        ctx.shadowBlur=0;
+        if (!isIOS) ctx.shadowBlur=0;
         ctx.fillStyle='#00ff88'; txt('AMIT!',gs+g.w/2,gy2+g.h+18,13,'#00ff88');
         txt('BFF ❤️',gs+g.w/2,gy2+g.h+33,11,'#00ff88');
       } else {
@@ -1067,9 +1083,9 @@ function mkS4() {
         const fx = rs+rg.w/2 + Math.cos(ang)*55, fy = ry2-10 + Math.sin(ang)*55;
         ctx.fillStyle=col; ctx.beginPath(); ctx.arc(fx,fy,6,0,Math.PI*2); ctx.fill();
       });
-      ctx.shadowColor='#fff'; ctx.shadowBlur=12;
+      ctx.shadowColor='#fff'; if (!isIOS) ctx.shadowBlur=12;
       faceCircle(SPR.rinat, rs+rg.w/2, ry2+rg.w/2, rg.w/2, '#e91e63');
-      ctx.shadowBlur=0;
+      if (!isIOS) ctx.shadowBlur=0;
       txt('👰 Rinat', rs+rg.w/2, ry2+rg.h+16, 12, '#ffd700');
       txt("It's her wedding!", rs+rg.w/2, ry2+rg.h+30, 9, 'rgba(255,255,255,0.7)');
 
@@ -1099,9 +1115,9 @@ function mkS4() {
       const glowR = rdy ? 50+Math.sin(t*4)*8 : 42;
       ctx.fillStyle=rdy?'rgba(255,105,180,0.18)':'rgba(200,200,200,0.1)';
       ctx.beginPath(); ctx.arc(hgs+hg.w/2, hgy+hg.w/2, glowR, 0, Math.PI*2); ctx.fill();
-      ctx.shadowColor=rdy?'#ff69b4':'transparent'; ctx.shadowBlur=rdy?24:0;
+      ctx.shadowColor=rdy?'#ff69b4':'transparent'; if (!isIOS) ctx.shadowBlur=rdy?24:0;
       faceCircle(SPR.hadas, hgs+hg.w/2, hgy+hg.w/2, hg.w/2, '#e91e63');
-      ctx.shadowBlur=0;
+      if (!isIOS) ctx.shadowBlur=0;
       if(rdy){
         txt('HADAS! 💕', hgs+hg.w/2, hgy+hg.h+18, 13, '#ff1493');
         // Arrow pointing to her
@@ -1183,9 +1199,9 @@ function mkS5() {
       ctx.strokeStyle='#ffd700'; ctx.lineWidth=4;
       ctx.beginPath(); ctx.arc(gs+g.w/2,gy2+20,50,Math.PI,0); ctx.stroke();
       if(rdy){
-        ctx.shadowColor='#ff69b4'; ctx.shadowBlur=20;
+        ctx.shadowColor='#ff69b4'; if (!isIOS) ctx.shadowBlur=20;
         faceCircle(SPR.hadas, gs+g.w/2, gy2+42, g.w/2-2, '#e91e63');
-        ctx.shadowBlur=0;
+        if (!isIOS) ctx.shadowBlur=0;
         txt('💒 I DO!',gs+g.w/2,gy2+g.h+18,13,'#ffd700');
       } else {
         ctx.globalAlpha=0.4;
