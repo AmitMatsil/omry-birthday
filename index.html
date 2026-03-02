@@ -49,6 +49,14 @@ body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
   <button class="btn" id="b0">🎮 BEGIN THE ADVENTURE!</button>
 </div>
 
+<!-- Rotate Screen -->
+<div class="ovr off" id="rotateScreen" style="background:#111;">
+  <div style="font-size:clamp(50px,15vw,80px);line-height:1.2">📱</div>
+  <h2 style="font-size:clamp(20px,5vw,32px);margin-top:10px">Rotate Your Device!</h2>
+  <p>This game is designed for <b>landscape mode</b>.</p>
+  <p style="font-size:clamp(30px,8vw,50px);margin:10px 0">🔄</p>
+</div>
+
 <script>
 'use strict';
 // roundRect polyfill for older browsers
@@ -72,15 +80,20 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 const GW = 800, GH = 450;
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-let scale = 1, ox = 0, oy = 0;
+canvas.width = GW; canvas.height = GH;
+let scale = 1;
 
 function resize() {
   const sw = window.innerWidth / GW, sh = window.innerHeight / GH;
   scale = Math.min(sw, sh);
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-  ox = (window.innerWidth  - GW * scale) / 2;
-  oy = (window.innerHeight - GH * scale) / 2;
+  const cw = GW * scale, ch = GH * scale;
+  canvas.style.width  = cw + 'px';
+  canvas.style.height = ch + 'px';
+  canvas.style.left   = ((window.innerWidth  - cw) / 2) + 'px';
+  canvas.style.top    = ((window.innerHeight - ch) / 2) + 'px';
+  // Show rotate overlay in portrait
+  const portrait = window.innerHeight > window.innerWidth;
+  document.getElementById('rotateScreen').classList.toggle('off', !portrait);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -124,33 +137,48 @@ window.addEventListener('keyup', e => { K[e.code] = false; });
 
 const TC = { left:false, right:false, jump:false };
 
-function toGC(cx, cy) { return { x:(cx-ox)/scale, y:(cy-oy)/scale }; }
+function toGC(cx, cy) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (cx - r.left) / r.width * GW, y: (cy - r.top) / r.height * GH };
+}
 
 function getBtns() {
   return [
-    { id:'left',  x:15,    y:GH-90, w:75, h:75 },
-    { id:'right', x:100,   y:GH-90, w:75, h:75 },
-    { id:'jump',  x:GW-95, y:GH-90, w:75, h:75 },
+    { id:'left',  x:12,    y:GH-100, w:88, h:88 },
+    { id:'right', x:108,   y:GH-100, w:88, h:88 },
+    { id:'jump',  x:GW-106, y:GH-100, w:88, h:88 },
   ];
 }
 
-function applyTouch(touches) {
+// Continue button zone (drawn on story/win screens)
+const CONT_BTN = { x:GW/2-150, y:GH-90, w:300, h:62 };
+function inContBtn(p) {
+  return p.x>CONT_BTN.x && p.x<CONT_BTN.x+CONT_BTN.w && p.y>CONT_BTN.y && p.y<CONT_BTN.y+CONT_BTN.h;
+}
+
+function applyGameTouch(touches) {
   TC.left = TC.right = TC.jump = false;
   for (const t of touches) {
     const p = toGC(t.clientX, t.clientY);
     for (const b of getBtns())
-      if (p.x>b.x && p.x<b.x+b.w && p.y>b.y && p.y<b.y+b.h)
-        TC[b.id] = true;
-    // Also allow tap anywhere (for story/win screens)
-    if (GS === 'story' || GS === 'stage_win') nextState();
+      if (p.x>b.x && p.x<b.x+b.w && p.y>b.y && p.y<b.y+b.h) TC[b.id] = true;
   }
 }
 
-canvas.addEventListener('touchstart', e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
-canvas.addEventListener('touchmove',  e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
-canvas.addEventListener('touchend',   e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
-canvas.addEventListener('touchcancel',e => { e.preventDefault(); applyTouch(e.touches); }, {passive:false});
-canvas.addEventListener('click', () => { if (GS === 'story' || GS === 'stage_win') nextState(); });
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (GS === 'story' || GS === 'stage_win') {
+    for (const t of e.changedTouches) { if (inContBtn(toGC(t.clientX,t.clientY))) { nextState(); return; } }
+    return; // don't pass story/win touches to game controls
+  }
+  applyGameTouch(e.touches);
+}, {passive:false});
+canvas.addEventListener('touchmove',   e => { e.preventDefault(); applyGameTouch(e.touches); }, {passive:false});
+canvas.addEventListener('touchend',    e => { e.preventDefault(); applyGameTouch(e.touches); }, {passive:false});
+canvas.addEventListener('touchcancel', e => { e.preventDefault(); applyGameTouch(e.touches); }, {passive:false});
+canvas.addEventListener('click', e => {
+  if (GS === 'story' || GS === 'stage_win') { if (inContBtn(toGC(e.clientX,e.clientY))) nextState(); }
+});
 
 // ═══════════════════════════════════════════════════════════
 //  PLAYER
@@ -1326,7 +1354,7 @@ function drawHUD() {
   const cl=pal(), t=Date.now()*0.001;
 
   // Lives
-  ctx.font='18px Arial'; ctx.textAlign='left';
+  ctx.font='22px Arial'; ctx.textAlign='left';
   for(let i=0;i<3;i++){
     ctx.globalAlpha=(i<P.lives)?1:0.25;
     ctx.fillText('❤️',10+i*26,26);
@@ -1334,16 +1362,16 @@ function drawHUD() {
   ctx.globalAlpha=1;
 
   // Stage
-  ctx.fillStyle=cl.txt; ctx.font='bold 13px Courier New'; ctx.textAlign='center';
+  ctx.fillStyle=cl.txt; ctx.font='bold 17px Courier New'; ctx.textAlign='center';
   ctx.fillText(`STAGE ${stageIdx+1} / 8`, GW/2, 20);
 
   // Score (top right)
-  ctx.textAlign='right'; ctx.fillStyle='#FFD700'; ctx.font='bold 14px Courier New';
+  ctx.textAlign='right'; ctx.fillStyle='#FFD700'; ctx.font='bold 17px Courier New';
   ctx.fillText(`⭐ ${score.toLocaleString()}`, GW-10, 20);
 
   // Items collected (below score)
   if(STAGE.itemsNeeded>0){
-    ctx.fillStyle=cl.txt; ctx.font='12px Courier New';
+    ctx.fillStyle=cl.txt; ctx.font='15px Courier New';
     ctx.fillText(`${STAGE.itemsCollected||0}/${STAGE.itemsNeeded}`,GW-10,38);
   }
 
@@ -1351,14 +1379,14 @@ function drawHUD() {
   if(stageIdx===7&&STAGE.survivalDuration){
     const remain=Math.max(0,Math.ceil((STAGE.survivalDuration-STAGE.survivalTimer)/60));
     ctx.fillStyle=remain<10?'#e74c3c':'#f39c12';
-    ctx.font='bold 26px Courier New'; ctx.textAlign='center';
+    ctx.font='bold 32px Courier New'; ctx.textAlign='center';
     ctx.fillText(`⏱ ${remain}s`,GW/2,50);
   }
 
   // Floating message
   if(msgTimer>0){
     ctx.globalAlpha=Math.min(1,msgTimer/30)*0.95;
-    ctx.fillStyle='#FFD700'; ctx.font='bold 20px Courier New'; ctx.textAlign='center';
+    ctx.fillStyle='#FFD700'; ctx.font='bold 26px Courier New'; ctx.textAlign='center';
     ctx.fillText(msgText,GW/2,GH/2-60);
     ctx.globalAlpha=1; msgTimer--;
   }
@@ -1376,7 +1404,7 @@ function drawTouchCtrl() {
     ctx.strokeStyle='rgba(255,255,255,0.45)'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.roundRect(b.x,b.y,b.w,b.h,12); ctx.fill(); ctx.stroke();
     ctx.fillStyle='rgba(255,255,255,0.85)';
-    ctx.font=`bold 28px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font=`bold 34px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
     if(b.id==='left')  ctx.fillText('◀',b.x+b.w/2,b.y+b.h/2);
     if(b.id==='right') ctx.fillText('▶',b.x+b.w/2,b.y+b.h/2);
     if(b.id==='jump')  ctx.fillText('🅰',b.x+b.w/2,b.y+b.h/2);
@@ -1400,22 +1428,21 @@ function drawStory() {
   ctx.beginPath(); ctx.roundRect(GW/2-280,50,560,GH-100,18); ctx.fill();
 
   ctx.fillStyle=cl.txt;
-  ctx.font=`bold ${clamp(22,5,34)}px Courier New`;
+  ctx.font=`bold ${clamp(26,5,38)}px Courier New`;
   ctx.textAlign='center';
   ctx.fillText(STAGE.storyTitle, GW/2, 115);
 
   STAGE.storyLines.forEach((line,i)=>{
     ctx.fillStyle='rgba(255,255,255,0.88)';
-    ctx.font=`${clamp(13,3,17)}px Courier New`;
-    ctx.fillText(line, GW/2, 165+i*38);
+    ctx.font=`${clamp(17,3.5,21)}px Courier New`;
+    ctx.fillText(line, GW/2, 165+i*44);
   });
 
-  // Pulse prompt
-  ctx.globalAlpha=0.6+Math.sin(t*3)*0.3;
-  ctx.fillStyle='#FFD700';
-  ctx.font='bold 16px Courier New';
-  ctx.fillText('▶  TAP / PRESS SPACE TO PLAY  ◀', GW/2, GH-55);
-  ctx.globalAlpha=1;
+  // PLAY button
+  ctx.fillStyle='#e74c3c';
+  ctx.beginPath(); ctx.roundRect(CONT_BTN.x,CONT_BTN.y,CONT_BTN.w,CONT_BTN.h,14); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Courier New'; ctx.textAlign='center';
+  ctx.fillText('▶  PLAY!', GW/2, CONT_BTN.y+40);
 }
 
 function clamp(base,vwFactor,max) {
@@ -1445,29 +1472,30 @@ function drawStageWin() {
   ctx.fillStyle='rgba(0,0,0,0.6)';
   ctx.beginPath(); ctx.roundRect(GW/2-260,80,520,GH-160,18); ctx.fill();
 
-  ctx.font='bold 26px Courier New'; ctx.textAlign='center';
+  ctx.font='bold 30px Courier New'; ctx.textAlign='center';
   ctx.fillStyle='#FFD700';
   ctx.fillText('✨ STAGE COMPLETE! ✨', GW/2, 125);
 
-  ctx.fillStyle='#fff'; ctx.font='bold 18px Courier New';
+  ctx.fillStyle='#fff'; ctx.font='bold 21px Courier New';
   ctx.fillText(STAGE.winTitle, GW/2, 160);
 
   // Score breakdown
-  ctx.fillStyle='#FFD700'; ctx.font='bold 14px Courier New';
+  ctx.fillStyle='#FFD700'; ctx.font='bold 16px Courier New';
   ctx.fillText(`+${stageBonus} pts  (500 base + ${P?P.lives:0}×150 lives)`, GW/2, 188);
-  ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.font='13px Courier New';
+  ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.font='16px Courier New';
   ctx.fillText(`Total Score: ⭐ ${score.toLocaleString()}`, GW/2, 208);
 
   STAGE.winLines.forEach((line,i)=>{
     ctx.fillStyle='rgba(255,255,255,0.82)';
-    ctx.font='13px Courier New';
+    ctx.font='16px Courier New';
     ctx.fillText(line, GW/2, 220+i*30);
   });
 
-  ctx.globalAlpha=0.6+Math.sin(t*3)*0.3;
-  ctx.fillStyle='#FFD700'; ctx.font='bold 16px Courier New';
-  ctx.fillText('▶  TAP / PRESS SPACE TO CONTINUE  ◀', GW/2, GH-55);
-  ctx.globalAlpha=1;
+  // CONTINUE button
+  ctx.fillStyle='#27ae60';
+  ctx.beginPath(); ctx.roundRect(CONT_BTN.x,CONT_BTN.y,CONT_BTN.w,CONT_BTN.h,14); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Courier New'; ctx.textAlign='center';
+  ctx.fillText('▶  CONTINUE', GW/2, CONT_BTN.y+40);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1475,9 +1503,9 @@ function drawStageWin() {
 // ═══════════════════════════════════════════════════════════
 function drawDead() {
   ctx.fillStyle='rgba(0,0,0,0.85)'; ctx.fillRect(0,0,GW,GH);
-  ctx.fillStyle='#e74c3c'; ctx.font='bold 36px Courier New'; ctx.textAlign='center';
+  ctx.fillStyle='#e74c3c'; ctx.font='bold 44px Courier New'; ctx.textAlign='center';
   ctx.fillText('💀 GAME OVER 💀', GW/2, GH/2-30);
-  ctx.fillStyle='#fff'; ctx.font='16px Courier New';
+  ctx.fillStyle='#fff'; ctx.font='20px Courier New';
   ctx.fillText('Omry will try again...', GW/2, GH/2+15);
   ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='13px Courier New';
   ctx.fillText('Restarting stage...', GW/2, GH/2+50);
@@ -1569,7 +1597,6 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 
   // Apply canvas transform for scaling
-  ctx.setTransform(scale, 0, 0, scale, ox, oy);
   ctx.clearRect(0, 0, GW, GH);
 
   switch(GS) {
